@@ -166,6 +166,7 @@ public abstract class ClientPutBase extends ClientRequest implements ClientPutCa
 
 	@Override
 	public void onSuccess(BaseClientPutter state) {
+	    if(logMINOR) Logger.minor(this, "Succceeding on "+this);
 		synchronized(this) {
 			// Including this helps with certain bugs...
 			//progressMessage = null;
