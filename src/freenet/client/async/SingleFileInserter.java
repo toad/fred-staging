@@ -205,7 +205,7 @@ class SingleFileInserter implements ClientPutState, Serializable {
 		
 		boolean shouldFreeData = freeData;
 		if(bestCodec != null) {
-			if(logMINOR) Logger.minor(this, "The best compression algorithm is "+bestCodec+ " we have gained"+ (100-(bestCompressedDataSize*100/origSize)) +"% ! ("+origSize+'/'+bestCompressedDataSize+')');
+			if(logMINOR) Logger.minor(this, "The best compression algorithm is "+bestCodec+ " we have gained "+ (100-(bestCompressedDataSize*100/origSize)) +"% ! ("+origSize+'/'+bestCompressedDataSize+')');
 			shouldFreeData = true; // must be freed regardless of whether the original data was to be freed
 			if(freeData) {
 				block.getData().free();

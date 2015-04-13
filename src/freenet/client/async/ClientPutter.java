@@ -281,6 +281,7 @@ public class ClientPutter extends BaseClientPutter implements PutCompletionCallb
 	/** Called when the insert succeeds. */
 	@Override
 	public void onSuccess(ClientPutState state, ClientContext context) {
+	    if(logMINOR) Logger.minor(this, "Succeeding on "+this);
 		synchronized(this) {
 			finished = true;
 			currentState = null;

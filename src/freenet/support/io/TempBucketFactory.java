@@ -529,6 +529,7 @@ public class TempBucketFactory implements BucketFactory, LockableRandomAccessBuf
                     }
                 }
                 currentBucket = new RAFBucket(raf);
+                if(logMINOR) Logger.minor(this, "toRandomAccessBuffer() on "+this+" -> "+raf);
                 return raf;
             }
         }

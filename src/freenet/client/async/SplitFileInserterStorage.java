@@ -1090,6 +1090,7 @@ public class SplitFileInserterStorage {
     }
 
     public void start() {
+        if(logDEBUG) Logger.debug(this, "Starting "+this, new Exception("debug"));
         boolean startSegments = (crossSegments == null);
         synchronized (this) {
             if(status == Status.NOT_STARTED) {
