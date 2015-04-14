@@ -196,7 +196,12 @@ public class SplitFileInserterStorage {
         NOT_STARTED, STARTED, ENCODED_CROSS_SEGMENTS, ENCODED, GENERATING_METADATA, SUCCEEDED, FAILED
     }
 
+    /** The current status of the insert. You must set finished if you set this to SUCCEEDED or 
+     * FAILED. */
     private Status status;
+    /** Set when status is set to SUCCEEDED or FAILED. Never unset. Really status is definitive, 
+     * but this is convenient to avoid locking (this). */
+    private volatile boolean finished;
     private final FailureCodeTracker errors;
     private boolean overallStatusDirty;
     
@@ -218,7 +223,16 @@ public class SplitFileInserterStorage {
 
     private final int overallStatusLength;
     
+    /** Protects cooldown calculations and noBlocksToSend. You MUST NOT take this lock while 
+     * holding any other locks!!!
+     * Cooldown calculation is tricky! Two major issues:
+     * 1. Consistency is essential because if we return Long.MAX_VALUE from getWakeupTime(), the
+     * insert will stall until it is explicitly rescheduled. That's the whole point, in fact.
+     * 2. Calculating the cooldown involves both (this) and segments. So it involves very nasty
+     * nested locking. */
     private final Object cooldownLock = new Object();
+    /** If true, the last chooseBlock() failed, there are no blocks to send. Protected by
+     * cooldownLock. */
     private boolean noBlocksToSend;
     
     /**
@@ -1437,6 +1451,7 @@ public class SplitFileInserterStorage {
                         synchronized(this) {
                             status = Status.SUCCEEDED;
                         }
+                        finished = true;
                         callback.onSucceeded(metadata);
                     } catch (IOException e) {
                         InsertException e1 = new InsertException(InsertExceptionMode.BUCKET_ERROR);
@@ -1444,6 +1459,7 @@ public class SplitFileInserterStorage {
                             failing = e1;
                             status = Status.FAILED;
                         }
+                        finished = true;
                         callback.onFailed(e1);
                     } catch (MissingKeyException e) {
                         // Fail here too. If we're getting disk corruption on keys, we're probably 
@@ -1453,6 +1469,7 @@ public class SplitFileInserterStorage {
                             failing = e1;
                             status = Status.FAILED;
                         }
+                        finished = true;
                         callback.onFailed(e1);
                     }
                 } else {
@@ -1477,6 +1494,7 @@ public class SplitFileInserterStorage {
                     return true;
                 }
                 status = Status.FAILED;
+                finished = true;
             }
             if(logMINOR) Logger.minor(this, "Maybe fail returning true with error "+e);
             callback.onFailed(e);
@@ -1563,6 +1581,7 @@ public class SplitFileInserterStorage {
                         if(hasFinished()) return false;
                         status = Status.FAILED;
                     }
+                    finished = true;
                     callback.onFailed(e);
                     return true;
                 } else {
@@ -1759,6 +1778,15 @@ public class SplitFileInserterStorage {
             noBlocksToSend = false;
         }
         this.callback.clearCooldown();
+    }
+
+    /** @return -1 if the insert has finished, 0 if has blocks to send, otherwise Long.MAX_VALUE. */
+    public long getWakeupTime(ClientContext context, long now) {
+        if(finished) return -1;
+        if(noBlocksToSend())
+            return Long.MAX_VALUE;
+        else
+            return 0;
     }
 
 }
