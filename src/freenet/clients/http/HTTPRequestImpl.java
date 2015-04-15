@@ -611,6 +611,12 @@ public class HTTPRequestImpl implements HTTPRequest {
 				bucketos.close();
 				bucketos = null;
 			
+				if(parts.get(name) != null) {
+				    // Huh?!
+				    Logger.error(this, "Already have a bucket for "+name);
+				    parts.get(name).free();
+				}
+				
 				parts.put(name, filedata);
 				if(logMINOR)
 					Logger.minor(this, "Name = " + name + " length = " + filedata.size() + " filename = " + filename);
