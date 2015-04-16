@@ -26,7 +26,8 @@ public class SplitFileFetcherSegmentBlockChooser extends CooldownBlockChooser {
         if(chosen == ignoreLastBlock) return false;
         try {
             SplitFileSegmentKeys keys = segment.getSegmentKeys();
-            if(keysFetching.hasKey(keys.getNodeKey(chosen, null, false), segment.parent.fetcher.getSendableGet()))
+            // FIXME change the callback to something more specific.
+            if(keysFetching.hasKey(keys.getNodeKey(chosen, null, false), segment.parent.fetcher.getSendableGet(segment.segNo)))
                 return false;
             return true;
         } catch (final IOException e) {

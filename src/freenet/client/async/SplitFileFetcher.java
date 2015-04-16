@@ -66,7 +66,7 @@ import freenet.support.io.StorageFormatException;
  * 
  * @author toad
  */
-public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorageCallback, Serializable {
+public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorageCallback, Serializable, HasKeyListener {
     
     private static final long serialVersionUID = 1L;
     private static volatile boolean logMINOR;
@@ -90,7 +90,7 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
     final long token;
     /** Storage doesn't have a ClientContext so we need one here. */
     private transient ClientContext context;
-    private transient SplitFileFetcherGet getter;
+    private transient SplitFileFetcherGet[] getters;
     private boolean failed;
     private boolean succeeded;
     private final boolean wantBinaryBlob;
@@ -159,7 +159,10 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
             cb.onFinalizedMetadata();
         if(eventualLength > 0 && fetchContext.maxOutputLength > 0 && eventualLength > fetchContext.maxOutputLength)
             throw new FetchException(FetchExceptionMode.TOO_BIG, eventualLength, true, clientMetadata.getMIMEType());
-        getter = new SplitFileFetcherGet(this, storage);
+        getters = new SplitFileFetcherGet[storage.segments.length];
+        for(int i=0;i<getters.length;i++) {
+            getters[i] = new SplitFileFetcherGet(this, storage.segments[i], context);
+        }
         raf = storage.getRAF();
         if(logMINOR)
             Logger.minor(this, "Created "+(persistent?"persistent" : "transient")+" download for "+
@@ -182,8 +185,11 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
 
     @Override
     public void schedule(ClientContext context) throws KeyListenerConstructionException {
-        if(storage.start(false))
-            getter.schedule(context, false);
+        if(storage.start(false)) {
+            ClientRequestScheduler sched = context.getChkFetchScheduler(realTimeFlag);
+            BlockSet blocks = blockFetchContext.blocks;
+            sched.register(this, getters, persistent, blocks, false);
+        }
     }
     
     /** Fail the whole splitfile request when we get an IOException on writing to or reading from 
@@ -212,8 +218,11 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
         }
         if(storage != null)
             context.getChkFetchScheduler(realTimeFlag).removePendingKeys(storage.keyListener, true);
-        if(getter != null)
-            getter.cancel(context);
+        if(getters != null) {
+            for(SplitFileFetcherGet getter : getters) {
+                getter.cancel(context);
+            }
+        }
         if(storage != null)
             storage.cancel();
         cb.onFailure(e, this, context);
@@ -253,7 +262,9 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
             return;
         }
         context.getChkFetchScheduler(realTimeFlag).removePendingKeys(storage.keyListener, true);
-        getter.cancel(context);
+        for(SplitFileFetcherGet getter : getters) {
+            getter.cancel(context);
+        }
         if(this.callbackCompleteViaTruncation != null) {
             long finalLength = storage.finalLength;
             this.callbackCompleteViaTruncation.onSuccess(fileCompleteViaTruncation, 
@@ -319,9 +330,9 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
     static final long STORE_NOTIFY_INTERVAL = 200;
 
     @Override
-    public void onFetchedBlock() {
+    public void onFetchedBlock(SplitFileFetcherSegmentStorage segment) {
         boolean dontNotify = true;
-        if(getter.hasQueued()) {
+        if(getters[segment.segNo].hasQueued()) {
             dontNotify = false;
         } else {
             synchronized(this) {
@@ -379,8 +390,8 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
     }
 
     @Override
-    public BaseSendableGet getSendableGet() {
-        return getter;
+    public BaseSendableGet getSendableGet(int segNo) {
+        return getters[segNo];
     }
 
     @Override
@@ -388,29 +399,21 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
         if(hasFinished()) return;
         Logger.error(this, "Restarting download "+this+" after data corruption");
         // We need to fetch more blocks. Some of them may even be in the datastore.
-        getter.unregister(context, getPriorityClass());
-        try {
-            getter.schedule(context, false);
-        } catch (KeyListenerConstructionException e) {
-            // Impossible.
+        // Restart all of them, it could affect multiple segments.
+        for(SplitFileFetcherGet getter : getters) {
+            getter.unregister(context, getPriorityClass());
+            try {
+                getter.schedule(context, false);
+            } catch (KeyListenerConstructionException e) {
+                // Impossible.
+            }
         }
         context.jobRunner.setCheckpointASAP();
     }
 
     @Override
-    public void clearCooldown() {
-        if(hasFinished()) return;
-        getter.clearWakeupTime(context);
-    }
-
-    @Override
-    public void reduceCooldown(long wakeupTime) {
-        getter.reduceWakeupTime(wakeupTime, context);
-    }
-
-    @Override
     public HasKeyListener getHasKeyListener() {
-        return getter;
+        return this;
     }
 
     @Override
@@ -446,10 +449,16 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
         synchronized(this) {
             lastNotifiedStoreFetch = System.currentTimeMillis();
         }
-        getter = new SplitFileFetcherGet(this, storage);
+        getters = new SplitFileFetcherGet[storage.segments.length];
+        for(int i=0;i<getters.length;i++) {
+            getters[i] = new SplitFileFetcherGet(this, storage.segments[i], context);
+        }
         try {
-            if(storage.start(resumed))
-                getter.schedule(context, storage.hasCheckedStore());
+            if(storage.start(resumed)) {
+                for(SplitFileFetcherGet getter : getters) {
+                    getter.schedule(context, storage.hasCheckedStore());
+                }
+            }
         } catch (KeyListenerConstructionException e) {
             Logger.error(this, "Key listener construction failed during resume: "+e, e);
             fail(new FetchException(FetchExceptionMode.INTERNAL_ERROR, "Resume failed: "+e, e));
@@ -518,6 +527,22 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
     @Override
     public void onShutdown(ClientContext context) {
         storage.onShutdown(context);
+    }
+
+    @Override
+    public KeyListener makeKeyListener(ClientContext context, boolean onStartup)
+            throws KeyListenerConstructionException {
+        return storage.keyListener;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return storage.hasFinished();
+    }
+
+    @Override
+    public void onFailed(KeyListenerConstructionException e, ClientContext context) {
+        throw new IllegalStateException(); // If constructor completes we have a listener.
     }
 
 }

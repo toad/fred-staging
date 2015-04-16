@@ -63,7 +63,7 @@ public interface SplitFileFetcherStorageCallback {
      * storage has been freed, i.e. the request is now completely finished. */
     void onClosed();
 
-    void onFetchedBlock();
+    void onFetchedBlock(SplitFileFetcherSegmentStorage segment);
     
     /** Called when the splitfile fetcher gives up on a block. (Assumed to be a non-fatal error,
      * run out of retries) */
@@ -82,19 +82,14 @@ public interface SplitFileFetcherStorageCallback {
     /** Do we want maybeAddToBinaryBlob() to be called?? LOCKING: Should not take any locks. */
     boolean wantBinaryBlob();
 
-    /** Can be null. Provided mainly for KeysFetchingLocally. */
-    BaseSendableGet getSendableGet();
+    /** Can be null. Provided mainly for KeysFetchingLocally. 
+     * @param segNo */
+    BaseSendableGet getSendableGet(int segNo);
 
     /** Called when we recover from disk corruption, and have to re-download some blocks that we
      * had already downloaded but which were corrupted on disk. E.g. when a segment attempts to 
      * decode but discovers that a block doesn't match the key given. */
     void restartedAfterDataCorruption();
-
-    /** Called when the fetcher may have exited cooldown early. */
-    void clearCooldown();
-
-    /** Called when the wakeup time reduces but it is still not fetchable. */
-    void reduceCooldown(long wakeupTime);
 
     /** Can be null. Provided for KeyListeners. */
     HasKeyListener getHasKeyListener();

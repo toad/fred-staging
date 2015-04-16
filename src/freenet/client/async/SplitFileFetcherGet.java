@@ -1,8 +1,9 @@
 package freenet.client.async;
 
+import java.io.IOException;
+
 import freenet.client.FetchContext;
 import freenet.client.FetchException;
-import freenet.client.async.SplitFileFetcherStorage.MyKey;
 import freenet.keys.ClientKey;
 import freenet.keys.Key;
 import freenet.node.KeysFetchingLocally;
@@ -10,13 +11,14 @@ import freenet.node.LowLevelGetException;
 import freenet.node.RequestClient;
 import freenet.node.SendableGet;
 import freenet.node.SendableRequestItem;
+import freenet.node.SendableRequestItemKey;
 import freenet.support.Logger;
 
 /** Actually does the splitfile fetch. Only one fetcher object for an entire splitfile.
  * 
  * PERSISTENCE: Not persistent, recreated on startup by SplitFileFetcher. */
 @SuppressWarnings("serial")
-public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
+public class SplitFileFetcherGet extends SendableGet {
     
     private static volatile boolean logMINOR;
     static {
@@ -24,24 +26,81 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
     }
 
     final SplitFileFetcher parent;
-    final SplitFileFetcherStorage storage;
+    final SplitFileFetcherSegmentStorage storage;
+    final ClientContext context;
+    private boolean checkedStore;
 
-    public SplitFileFetcherGet(SplitFileFetcher fetcher, SplitFileFetcherStorage storage) {
+    public SplitFileFetcherGet(SplitFileFetcher fetcher, SplitFileFetcherSegmentStorage storage, 
+            ClientContext context) {
         super(fetcher.parent, fetcher.realTimeFlag);
         this.parent = fetcher;
         this.storage = storage;
+        this.context = context;
+    }
+    
+    final class MyKey implements SendableRequestItem, SendableRequestItemKey {
+
+        public MyKey(int n, SplitFileFetcherSegmentStorage storage) {
+            this.blockNumber = n;
+            this.get = storage;
+            hashCode = initialHashCode();
+        }
+
+        final int blockNumber;
+        final SplitFileFetcherSegmentStorage get;
+        final int hashCode;
+
+        @Override
+        public void dump() {
+            // Ignore.
+        }
+
+        @Override
+        public SendableRequestItemKey getKey() {
+            return this;
+        }
+        
+        @Override
+        public boolean equals(Object o) {
+            if(this == o) return true;
+            if(!(o instanceof MyKey)) return false;
+            MyKey k = (MyKey)o;
+            return k.blockNumber == blockNumber && k.get == get;
+        }
+        
+        public int hashCode() {
+            return hashCode;
+        }
+
+        private int initialHashCode() {
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + blockNumber;
+            result = prime * result + ((get == null) ? 0 : get.hashCode());
+            return result;
+        }
+        
+        public String toString() {
+            return "MyKey:"+get.segNo+":"+blockNumber;
+        }
+
     }
 
     @Override
     public ClientKey getKey(SendableRequestItem token) {
         MyKey key = (MyKey) token;
         if(key.get != storage) throw new IllegalArgumentException();
-        return storage.getKey(key);
+        return storage.getKey(key.blockNumber);
     }
 
     @Override
     public Key[] listKeys() {
-        return storage.listUnfetchedKeys();
+        try {
+            return storage.listUnfetchedKeys();
+        } catch (IOException e) {
+            storage.parent.failOnDiskError(e);
+            return new Key[0];
+        }
     }
 
     @Override
@@ -62,32 +121,33 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
         } else {
             MyKey key = (MyKey) token;
             if(key.get != storage) throw new IllegalArgumentException();
-            storage.onFailure(key, fe);
+            long wakeupTime = storage.parent.onFailure(key, fe);
+            if (wakeupTime != Long.MAX_VALUE)
+                reduceWakeupTime(wakeupTime, context);
         }
     }
     
     @Override
     public long getWakeupTime(ClientContext context, long now) {
-        long wakeTime = storage.getCooldownWakeupTime(now);
-        if(wakeTime == 0) return 0;
-        return wakeTime;
+        long ret = storage.getOverallCooldownTime();
+        if(ret < now) return 0;
+        return ret;
     }
 
     @Override
     public long getCooldownWakeup(SendableRequestItem token, ClientContext context) {
         MyKey key = (MyKey) token;
-        return storage.segments[key.segmentNumber].getCooldownTime(key.blockNumber);
+        return storage.getCooldownTime(key.blockNumber);
     }
 
     @Override
     public boolean preRegister(ClientContext context, boolean toNetwork) {
         if(!toNetwork) return false;
+        if(!storage.setHasCheckedStore(context)) return false;
         // Notify clients of all the work we've done checking the datastore.
         if(parent.localRequestOnly()) {
-            storage.finishedCheckingDatastoreOnLocalRequest(context);
+            storage.parent.finishedCheckingDatastoreOnLocalRequest(context);
             return true;
-        } else {
-            storage.setHasCheckedStore(context);
         }
         parent.toNetwork();
         parent.parent.notifyClients(context);
@@ -102,7 +162,11 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
     @Override
     /** Choose a random key to fetch. Must not modify anything that is persisted. */
     public SendableRequestItem chooseKey(KeysFetchingLocally keys, ClientContext context) {
-        return storage.chooseRandomKey();
+        int block = storage.chooseRandomKey();
+        if(block == -1) {
+            return null;
+        }
+        return new MyKey(block, storage);
     }
 
     @Override
@@ -112,7 +176,7 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
 
     @Override
     public long countSendableKeys(ClientContext context) {
-        return storage.countSendableKeys();
+        return storage.countSendableKeys(System.currentTimeMillis(), storage.parent.maxRetries());
     }
 
     @Override
@@ -147,18 +211,7 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
     public void schedule(ClientContext context, boolean ignoreStore) throws KeyListenerConstructionException {
         ClientRequestScheduler sched = context.getChkFetchScheduler(realTimeFlag);
         BlockSet blocks = parent.blockFetchContext.blocks;
-        sched.register(this, new SendableGet[] { this }, persistent, blocks, ignoreStore);
-    }
-
-    @Override
-    public KeyListener makeKeyListener(ClientContext context, boolean onStartup) {
-        return storage.keyListener;
-    }
-
-    @Override
-    public void onFailed(KeyListenerConstructionException e, ClientContext context) {
-        // Impossible.
-        throw new IllegalStateException();
+        sched.register(null, new SendableGet[] { this }, persistent, blocks, ignoreStore);
     }
 
     public void cancel(ClientContext context) {
@@ -174,5 +227,5 @@ public class SplitFileFetcherGet extends SendableGet implements HasKeyListener {
     protected ClientGetState getClientGetState() {
         return parent;
     }
-    
+
 }

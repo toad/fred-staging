@@ -490,7 +490,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
         }
 
         @Override
-        public void onFetchedBlock() {
+        public void onFetchedBlock(SplitFileFetcherSegmentStorage segment) {
             // Ignore.
         }
 
@@ -518,7 +518,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
         }
 
         @Override
-        public BaseSendableGet getSendableGet() {
+        public BaseSendableGet getSendableGet(int segNo) {
             return null;
         }
 
@@ -528,16 +528,6 @@ public class SplitFileFetcherStorageTest extends TestCase {
             synchronized(this) {
                 hasRestartedOnCorruption = true;
             }
-        }
-
-        @Override
-        public void clearCooldown() {
-            // Ignore.
-        }
-        
-        @Override
-        public void reduceCooldown(long wakeupTime) {
-            // Ignore.
         }
 
         @Override
@@ -892,7 +882,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
         SplitFileFetcherStorage storage = test.createStorage(cb, ctx);
         boolean[] tried = new boolean[dataBlocks+checkBlocks];
         innerChooseKeyTest(dataBlocks, checkBlocks, storage.segments[0], tried, test, false);
-        assertEquals(storage.chooseRandomKey(), null);
+        assertEquals(storage.segments[0].chooseRandomKey(), -1);
         cb.waitForFailed();
     }
     
@@ -943,7 +933,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
             boolean[] tried = new boolean[dataBlocks+checkBlocks];
             innerChooseKeyTest(dataBlocks, checkBlocks, storage.segments[0], tried, test, false);
         }
-        assertEquals(storage.chooseRandomKey(), null);
+        assertEquals(storage.segments[0].chooseRandomKey(), -1);
         cb.waitForFailed();
     }
     
@@ -967,7 +957,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
         assertFalse(storage.segments[0].getOverallCooldownTime() == Long.MAX_VALUE);
         // Now in cooldown.
         test.fetchingKeys.clear();
-        assertEquals(storage.chooseRandomKey(), null);
+        assertEquals(storage.segments[0].chooseRandomKey(), -1);
         Thread.sleep((long)(COOLDOWN_TIME+COOLDOWN_TIME/2+1));
         cb.checkFailed();
         // Should be out of cooldown now.
@@ -1066,7 +1056,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
             innerChooseKeyTest(dataBlocks, checkBlocks, storage.segments[0], tried, test, false);
         }
         test.fetchingKeys.clear();
-        assertEquals(storage.chooseRandomKey(), null);
+        assertEquals(storage.segments[0].chooseRandomKey(), -1);
         cb.waitForFailed();
     }
     
@@ -1097,7 +1087,7 @@ public class SplitFileFetcherStorageTest extends TestCase {
             }
         }
         test.fetchingKeys.clear();
-        assertEquals(storage.chooseRandomKey(), null);
+        assertEquals(storage.segments[0].chooseRandomKey(), null);
         cb.waitForFailed();
     }
     

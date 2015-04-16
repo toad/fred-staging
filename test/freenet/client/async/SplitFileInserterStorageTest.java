@@ -1258,7 +1258,7 @@ public class SplitFileInserterStorageTest extends TestCase {
         }
 
         @Override
-        public synchronized void onFetchedBlock() {
+        public synchronized void onFetchedBlock(SplitFileFetcherSegmentStorage segment) {
             fetchedBlocks++;
         }
 
@@ -1293,7 +1293,7 @@ public class SplitFileInserterStorageTest extends TestCase {
         }
 
         @Override
-        public BaseSendableGet getSendableGet() {
+        public BaseSendableGet getSendableGet(int segNo) {
             return null;
         }
 
@@ -1302,16 +1302,6 @@ public class SplitFileInserterStorageTest extends TestCase {
             restartedAfterDataCorruption++;
         }
 
-        @Override
-        public void clearCooldown() {
-            // Ignore.
-        }
-        
-        @Override
-        public void reduceCooldown(long wakeupTime) {
-            // Ignore.
-        }
-        
         @Override
         public HasKeyListener getHasKeyListener() {
             return null;

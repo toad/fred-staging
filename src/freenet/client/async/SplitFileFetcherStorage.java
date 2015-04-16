@@ -26,6 +26,7 @@ import freenet.client.Metadata.SplitfileAlgorithm;
 import freenet.client.MetadataParseException;
 import freenet.client.MetadataUnresolvedException;
 import freenet.client.FECCodec;
+import freenet.client.async.SplitFileFetcherGet.MyKey;
 import freenet.crypt.ChecksumChecker;
 import freenet.crypt.ChecksumFailedException;
 import freenet.crypt.HashType;
@@ -36,8 +37,6 @@ import freenet.keys.ClientKey;
 import freenet.keys.FreenetURI;
 import freenet.keys.Key;
 import freenet.node.KeysFetchingLocally;
-import freenet.node.SendableRequestItem;
-import freenet.node.SendableRequestItemKey;
 import freenet.support.Logger;
 import freenet.support.MemoryLimitedJobRunner;
 import freenet.support.Ticker;
@@ -177,13 +176,6 @@ public class SplitFileFetcherStorage {
     final int cooldownTries;
     /** Cooldown lasts this long for each key. */
     final long cooldownLength;
-    /** Separate lock for cooldown operations, which must be serialized. Must be taken *BEFORE*
-     * segment locks. DO NOT TAKE THIS LOCK WHILE HOLDING ANY OTHER LOCK! */
-    private final Object cooldownLock = new Object();
-    /** Only set if all segments are in cooldown. Will be either 0 if not in cooldown, -1 if 
-     * finished, or a time at which the request will become fetchable again. 
-     * LOCKING: Protected by cooldownLock, be careful! */
-    private long overallCooldownWakeupTime;
     final CompatibilityMode finalMinCompatMode;
     
     /** Contains Bloom filters */
@@ -1149,9 +1141,6 @@ public class SplitFileFetcherStorage {
                     if(succeeded) return false;
                     succeeded = true;
                 }
-                synchronized(cooldownLock) {
-                    overallCooldownWakeupTime = -1;
-                }
                 fetcher.onSuccess();
                 return true;
             }
@@ -1359,9 +1348,6 @@ public class SplitFileFetcherStorage {
             
             @Override
             public boolean run(ClientContext context) {
-                synchronized(cooldownLock) {
-                    overallCooldownWakeupTime = -1;
-                }
                 fetcher.fail(e);
                 return true;
             }
@@ -1383,9 +1369,6 @@ public class SplitFileFetcherStorage {
 
             @Override
             public boolean run(ClientContext context) {
-                synchronized(cooldownLock) {
-                    overallCooldownWakeupTime = -1;
-                }
                 fetcher.failOnDiskError(e);
                 return true;
             }
@@ -1399,9 +1382,6 @@ public class SplitFileFetcherStorage {
 
             @Override
             public boolean run(ClientContext context) {
-                synchronized(cooldownLock) {
-                    overallCooldownWakeupTime = -1;
-                }
                 fetcher.failOnDiskError(e);
                 return true;
             }
@@ -1434,93 +1414,6 @@ public class SplitFileFetcherStorage {
         for(SplitFileFetcherSegmentStorage segment : segments)
             total += segment.countSendableKeys(now, maxRetries);
         return total;
-    }
-
-    final class MyKey implements SendableRequestItem, SendableRequestItemKey {
-
-        public MyKey(int n, int segNo, SplitFileFetcherStorage storage) {
-            this.blockNumber = n;
-            this.segmentNumber = segNo;
-            this.get = storage;
-            hashCode = initialHashCode();
-        }
-
-        final int blockNumber;
-        final int segmentNumber;
-        final SplitFileFetcherStorage get;
-        final int hashCode;
-
-        @Override
-        public void dump() {
-            // Ignore.
-        }
-
-        @Override
-        public SendableRequestItemKey getKey() {
-            return this;
-        }
-        
-        @Override
-        public boolean equals(Object o) {
-            if(this == o) return true;
-            if(!(o instanceof MyKey)) return false;
-            MyKey k = (MyKey)o;
-            return k.blockNumber == blockNumber && k.segmentNumber == segmentNumber && 
-                k.get == get;
-        }
-        
-        public int hashCode() {
-            return hashCode;
-        }
-
-        private int initialHashCode() {
-            final int prime = 31;
-            int result = 1;
-            result = prime * result + blockNumber;
-            result = prime * result + ((get == null) ? 0 : get.hashCode());
-            result = prime * result + segmentNumber;
-            return result;
-        }
-        
-        public String toString() {
-            return "MyKey:"+segmentNumber+":"+blockNumber;
-        }
-
-    }
-
-    /** Choose a random key which can be fetched at the moment. Must not update any persistent data;
-     * it's okay to update caches and other stuff that isn't stored to disk. If we fail etc we 
-     * should do it off-thread.
-     * @return The block number to be fetched, as an integer.
-     */
-    public MyKey chooseRandomKey() {
-        // FIXME this should probably use SimpleBlockChooser and hence use lowest-retry-count from each segment?
-        synchronized(this) {
-            if(finishedFetcher) return null;
-        }
-        // Generally segments are fairly well balanced, so we can usually pick a random segment 
-        // then a random key from it.
-        int segNo = random.nextInt(segments.length);
-        SplitFileFetcherSegmentStorage segment = segments[segNo];
-        int ret = segment.chooseRandomKey();
-        if(ret != -1) return new MyKey(ret, segNo, this);
-        // Looks like we are close to completion ...
-        // FIXME OPT SCALABILITY This is O(n) memory and time with the number of segments. For a 
-        // 4GB splitfile, there would be 512 segments. The alternative is to keep a similar 
-        // structure up to date, which also requires changes to the segment code. Not urgent until
-        // very big splitfiles are common.
-        // FIXME OPT SCALABILITY A simpler option might be just to have one SplitFileFetcherGet per
-        // segment, like the old code.
-        boolean[] tried = new boolean[segments.length];
-        tried[segNo] = true;
-        for(int count=1; count<segments.length; count++) {
-            while(tried[segNo = random.nextInt(segments.length)]);
-            tried[segNo] = true;
-            segment = segments[segNo];
-            ret = segment.chooseRandomKey();
-            if(ret != -1) return new MyKey(ret, segNo, this);
-        }
-        return null;
     }
 
     /** Cancel the download, stop all FEC decodes, and call close() off-thread when done. */
@@ -1557,21 +1450,28 @@ public class SplitFileFetcherStorage {
         return cancelled || finishedFetcher || finishedEncoding;
     }
 
-    public void onFailure(MyKey key, FetchException fe) {
-        if(logMINOR) Logger.minor(this, "Failure: "+fe.mode+" for block "+key.blockNumber+" for "+key.segmentNumber);
+    /** Handle a block failure.
+     * @param key
+     * @param fe
+     * @return Long.MAX_VALUE unless the cooldown time has changed, otherwise the time at which the
+     * getter should wake up.
+     */
+    public long onFailure(MyKey key, FetchException fe) {
+        if(logMINOR) Logger.minor(this, "Failure: "+fe.mode+" for block "+key.blockNumber+" for "+key.get);
         synchronized(this) {
-            if(cancelled || finishedFetcher) return;
+            if(cancelled || finishedFetcher) return Long.MAX_VALUE;
             dirtyGeneralProgress = true;
         }
         errors.inc(fe.getMode());
-        SplitFileFetcherSegmentStorage segment = segments[key.segmentNumber];
-        segment.onNonFatalFailure(key.blockNumber);
+        SplitFileFetcherSegmentStorage segment = key.get;
+        long wakeupTime = segment.onNonFatalFailure(key.blockNumber);
         lazyWriteMetadata();
+        return wakeupTime;
     }
 
     public ClientKey getKey(MyKey key) {
         try {
-            return segments[key.segmentNumber].getSegmentKeys().getKey(key.blockNumber, null, false);
+            return key.get.getSegmentKeys().getKey(key.blockNumber, null, false);
         } catch (IOException e) {
             this.failOnDiskError(e);
             return null;
@@ -1604,7 +1504,6 @@ public class SplitFileFetcherStorage {
 
             @Override
             public boolean run(ClientContext context) {
-                maybeClearCooldownInner();
                 fetcher.restartedAfterDataCorruption();
                 return false;
             }
@@ -1612,74 +1511,6 @@ public class SplitFileFetcherStorage {
         });
     }
 
-    /** Called when a segment goes into overall cooldown. */
-    void increaseCooldown(SplitFileFetcherSegmentStorage splitFileFetcherSegmentStorage,
-            final long cooldownTime) {
-        // Risky locking-wise, so run as a separate job.
-        jobRunner.queueNormalOrDrop(new PersistentJob() {
-
-            @Override
-            public boolean run(ClientContext context) {
-                long now = System.currentTimeMillis();
-                long wakeupTime;
-                if(hasFinished()) {
-                    synchronized(cooldownLock) {
-                        overallCooldownWakeupTime = -1;
-                    }
-                }
-                synchronized(cooldownLock) {
-                    if(cooldownTime < now) return false;
-                    long oldCooldownTime = overallCooldownWakeupTime;
-                    if(overallCooldownWakeupTime > now) return false; // Wait for it to wake up.
-                    wakeupTime = Long.MAX_VALUE;
-                    for(SplitFileFetcherSegmentStorage segment : segments) {
-                        long segmentTime = segment.getOverallCooldownTime();
-                        if(segmentTime < now) return false;
-                        wakeupTime = Math.min(segmentTime, wakeupTime);
-                    }
-                    overallCooldownWakeupTime = wakeupTime;
-                    if(overallCooldownWakeupTime < oldCooldownTime) return false;
-                }
-                fetcher.reduceCooldown(wakeupTime);
-                return false;
-            }
-            
-        });
-    }
-
-    /** Called when a segment exits cooldown e.g. due to a request completing and becoming 
-     * retryable. Must NOT be called with segment locks held. */
-    public void maybeClearCooldown() {
-        jobRunner.queueNormalOrDrop(new PersistentJob() {
-
-            @Override
-            public boolean run(ClientContext context) {
-                maybeClearCooldownInner();
-                return false;
-            }
-            
-        });
-    }
-
-    protected void maybeClearCooldownInner() {
-        synchronized(cooldownLock) {
-            if(overallCooldownWakeupTime == -1) return;
-            if(overallCooldownWakeupTime == 0 || 
-                    overallCooldownWakeupTime < System.currentTimeMillis()) return;
-            overallCooldownWakeupTime = 0;
-        }
-        fetcher.clearCooldown();
-    }
-
-    /** Returns -1 if the request is finished, otherwise the wakeup time. */
-    public long getCooldownWakeupTime(long now) {
-        synchronized(cooldownLock) {
-            if(overallCooldownWakeupTime > 0 && overallCooldownWakeupTime < now) 
-                overallCooldownWakeupTime = 0;
-            return overallCooldownWakeupTime;
-        }
-    }
-    
     // Operations with checksums and storage access.
     
     /** Append a CRC32 to a (short) byte[] */
@@ -1771,6 +1602,14 @@ public class SplitFileFetcherStorage {
     /** Needed for resuming. */
     LockableRandomAccessBuffer getRAF() {
         return raf;
+    }
+    
+    public boolean maybeSetHasCheckedStore(ClientContext context) {
+        for(SplitFileFetcherSegmentStorage segment : segments) {
+            if(!segment.hasCheckedStore()) return false;
+        }
+        setHasCheckedStore(context);
+        return true;
     }
 
     public synchronized void setHasCheckedStore(ClientContext context) {

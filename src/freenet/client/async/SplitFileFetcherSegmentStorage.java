@@ -104,6 +104,7 @@ public class SplitFileFetcherSegmentStorage {
     private int crossCheckBlocksAllocated;
     /** Number of blocks we've given up on. */
     private int failedBlocks;
+    private boolean hasCheckedDatastore;
     
     private static volatile boolean logMINOR;
     static {
@@ -793,7 +794,7 @@ public class SplitFileFetcherSegmentStorage {
                 
                 @Override
                 public boolean run(ClientContext context) {
-                    parent.fetcher.onFetchedBlock();
+                    parent.fetcher.onFetchedBlock(SplitFileFetcherSegmentStorage.this);
                     return false;
                 }
                 
@@ -943,12 +944,17 @@ public class SplitFileFetcherSegmentStorage {
         return parent.readBlock(this, slotNumber);
     }
     
-    public void onNonFatalFailure(int blockNumber) {
+    /** Handle a non-fatal block failure.
+     * @param blockNumber The block number.
+     * @return Long.MAX_VALUE unless the cooldown time has changed, otherwise the time at which the
+     * getter should wake up.
+     */
+    public long onNonFatalFailure(int blockNumber) {
         boolean givenUp = false;
         boolean kill = false;
-        boolean wake = false;
         boolean write = false;
         if(logMINOR) Logger.minor(this, "Non-fatal failure on block "+blockNumber+" for "+this+" for "+parent);
+        long wakeupTime = Long.MAX_VALUE;
         synchronized(this) {
             long cooldown = blockChooser.overallCooldownTime();
             if(blockChooser.onNonFatalFailure(blockNumber)) {
@@ -971,8 +977,9 @@ public class SplitFileFetcherSegmentStorage {
                 }
             } else {
                 if(logMINOR) Logger.minor(this, "Block "+blockNumber+" on "+this+" : "+blockChooser.getRetries(blockNumber)+"/"+blockChooser.maxRetries);
-                if(blockChooser.overallCooldownTime() < cooldown)
-                    wake = true;
+                wakeupTime = blockChooser.overallCooldownTime();
+                if (!(wakeupTime < cooldown))
+                    wakeupTime = Long.MAX_VALUE;
                 write = true;
             }
             if(write)
@@ -993,8 +1000,7 @@ public class SplitFileFetcherSegmentStorage {
                 parent.finishedEncoding(this);
             }
         }
-        if(wake)
-            parent.maybeClearCooldown();
+        return wakeupTime;
     }
     
     /** The metadata has been updated. We should write it ... at some point. CALLER MUST SET metadataDirty! */
@@ -1128,7 +1134,7 @@ public class SplitFileFetcherSegmentStorage {
         return blockChooser.countFetchable();
     }
 
-    public synchronized void getUnfetchedKeys(List<Key> keys) throws IOException {
+    synchronized void getUnfetchedKeys(List<Key> keys) throws IOException {
         if(finished || tryDecode)
             return;
         SplitFileSegmentKeys keyList = getSegmentKeys();
@@ -1136,6 +1142,12 @@ public class SplitFileFetcherSegmentStorage {
             if(!blockChooser.hasSucceeded(i))
                 keys.add(keyList.getNodeKey(i, null, false));
         }
+    }
+
+    public Key[] listUnfetchedKeys() throws IOException {
+        ArrayList<Key> keys = new ArrayList<Key>();
+        getUnfetchedKeys(keys);
+        return keys.toArray(new Key[keys.size()]);
     }
 
     /** Pick a key to fetch. Must not update any persistent field. (Cooldowns etc are fine) */
@@ -1156,14 +1168,7 @@ public class SplitFileFetcherSegmentStorage {
                 if(logMINOR) Logger.minor(this, "No keys chosen for "+this);
             }
         }
-        if(chosen == -1) {
-            long cooldownTime = blockChooser.overallCooldownTime();
-            if(cooldownTime > System.currentTimeMillis())
-                parent.increaseCooldown(this, cooldownTime);
-            return -1;
-        } else {
-            return chosen;
-        }
+        return chosen;
     }
     
     public void cancel() {
@@ -1270,6 +1275,23 @@ public class SplitFileFetcherSegmentStorage {
             finished = true;
         }
         parent.finishedEncoding(this);
+    }
+
+    public boolean setHasCheckedStore(ClientContext context) {
+        synchronized(this) {
+            if(hasCheckedDatastore) return false;
+            hasCheckedDatastore = true;
+        }
+        return parent.maybeSetHasCheckedStore(context);
+    }
+    
+    public synchronized boolean hasCheckedStore() {
+        return hasCheckedDatastore;
+    }
+
+    public void setGetter(SplitFileFetcherGet splitFileFetcherGet) {
+        // TODO Auto-generated method stub
+        
     }
 
 }
