@@ -186,12 +186,16 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
     @Override
     public void schedule(ClientContext context) throws KeyListenerConstructionException {
         if(storage.start(false)) {
-            ClientRequestScheduler sched = context.getChkFetchScheduler(realTimeFlag);
-            BlockSet blocks = blockFetchContext.blocks;
-            sched.register(this, getters, persistent, blocks, false);
+            scheduleGetters(false);
         }
     }
     
+    private void scheduleGetters(boolean noCheckStore) throws KeyListenerConstructionException {
+        ClientRequestScheduler sched = context.getChkFetchScheduler(realTimeFlag);
+        BlockSet blocks = blockFetchContext.blocks;
+        sched.register(this, getters, persistent, blocks, noCheckStore);
+    }
+
     /** Fail the whole splitfile request when we get an IOException on writing to or reading from 
      * the on-disk storage. Can be called asynchronously by SplitFileFetcher*Storage if an 
      * off-thread job (e.g. FEC decoding) breaks, or may be called when SplitFileFetcher*Storage
@@ -402,11 +406,11 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
         // Restart all of them, it could affect multiple segments.
         for(SplitFileFetcherGet getter : getters) {
             getter.unregister(context, getPriorityClass());
-            try {
-                getter.schedule(context, false);
-            } catch (KeyListenerConstructionException e) {
-                // Impossible.
-            }
+        }
+        try {
+            scheduleGetters(false);
+        } catch (KeyListenerConstructionException e) {
+            // Impossible.
         }
         context.jobRunner.setCheckpointASAP();
     }
@@ -455,9 +459,7 @@ public class SplitFileFetcher implements ClientGetState, SplitFileFetcherStorage
         }
         try {
             if(storage.start(resumed)) {
-                for(SplitFileFetcherGet getter : getters) {
-                    getter.schedule(context, storage.hasCheckedStore());
-                }
+                scheduleGetters(storage.hasCheckedStore());
             }
         } catch (KeyListenerConstructionException e) {
             Logger.error(this, "Key listener construction failed during resume: "+e, e);
