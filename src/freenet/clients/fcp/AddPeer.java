@@ -13,15 +13,11 @@ import java.io.InputStreamReader;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.util.Arrays;
 
-import freenet.io.comm.PeerParseException;
-import freenet.io.comm.ReferenceSignatureVerificationException;
 import freenet.node.DarknetPeerNode.FRIEND_TRUST;
 import freenet.node.DarknetPeerNode.FRIEND_VISIBILITY;
-import freenet.node.FSParseException;
 import freenet.node.Node;
-import freenet.node.OpennetDisabledException;
+import freenet.node.Node.PeerAdditionException;
 import freenet.node.PeerNode;
 import freenet.support.MediaType;
 import freenet.support.SimpleFieldSet;
@@ -144,42 +140,25 @@ public class AddPeer extends FCPMessage {
 		fs.setEndMarker( "End" );
 		PeerNode pn;
 		boolean isOpennetRef = fs.getBoolean("opennet", false);
-		if(isOpennetRef) {
-			try {
-				pn = node.createNewOpennetNode(fs);
-			} catch (FSParseException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_PARSE_ERROR, "Error parsing ref: "+e.getMessage(), identifier, false);
-			} catch (OpennetDisabledException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.OPENNET_DISABLED, "Error adding ref: "+e.getMessage(), identifier, false);
-			} catch (PeerParseException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_PARSE_ERROR, "Error parsing ref: "+e.getMessage(), identifier, false);
-			} catch (ReferenceSignatureVerificationException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_SIGNATURE_INVALID, "Error adding ref: "+e.getMessage(), identifier, false);
-			}
-			if(Arrays.equals(pn.getPeerECDSAPubKeyHash(), node.getOpennetPubKeyHash()))
-				throw new MessageInvalidException(ProtocolErrorMessage.CANNOT_PEER_WITH_SELF, "Node cannot peer with itself", identifier, false);
-			if(!node.addPeerConnection(pn)) {
-				throw new MessageInvalidException(ProtocolErrorMessage.DUPLICATE_PEER_REF, "Node already has a peer with that identity", identifier, false);
-			}
-			System.out.println("Added opennet peer: "+pn);
-		} else {
-			try {
-				pn = node.createNewDarknetNode(fs, trust, visibility);
-			} catch (FSParseException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_PARSE_ERROR, "Error parsing ref: "+e.getMessage(), identifier, false);
-			} catch (PeerParseException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_PARSE_ERROR, "Error parsing ref: "+e.getMessage(), identifier, false);
-			} catch (ReferenceSignatureVerificationException e) {
-				throw new MessageInvalidException(ProtocolErrorMessage.REF_SIGNATURE_INVALID, "Error adding ref: "+e.getMessage(), identifier, false);
-			}
-			if(Arrays.equals(pn.getPeerECDSAPubKeyHash(), node.getDarknetPubKeyHash()))
-				throw new MessageInvalidException(ProtocolErrorMessage.CANNOT_PEER_WITH_SELF, "Node cannot peer with itself", identifier, false);
-			if(!node.addPeerConnection(pn)) {
-				throw new MessageInvalidException(ProtocolErrorMessage.DUPLICATE_PEER_REF, "Node already has a peer with that identity", identifier, false);
-			}
-			System.out.println("Added darknet peer: "+pn);
+		try {
+		    pn = node.addNewNode(fs, "", trust, visibility, isOpennetRef);
+            handler.outputHandler.queue(new PeerMessage(pn, true, true, identifier));
+		} catch (PeerAdditionException e) {
+		    switch(e.failureCode) {
+	        case ALREADY_IN_REFERENCE:
+	            throw new MessageInvalidException(ProtocolErrorMessage.DUPLICATE_PEER_REF, "Node already has a peer with that identity", identifier, false);
+            case TRY_TO_ADD_SELF:
+                throw new MessageInvalidException(ProtocolErrorMessage.CANNOT_PEER_WITH_SELF, "Node cannot peer with itself", identifier, false);               
+            case INVALID_SIGNATURE:
+                throw new MessageInvalidException(ProtocolErrorMessage.REF_SIGNATURE_INVALID, "Error adding ref: "+e.getMessage(), identifier, false);
+	        case CANT_PARSE:
+	            throw new MessageInvalidException(ProtocolErrorMessage.REF_PARSE_ERROR, "Error parsing ref: "+e.getMessage(), identifier, false);
+	        case WRONG_ENCODING: // Impossible
+	        case OK: // Impossible
+	        case INTERNAL_ERROR:
+	            throw new MessageInvalidException(ProtocolErrorMessage.INTERNAL_ERROR, "Internal error: "+e.getMessage(), identifier, false);
+		    }
 		}
-		handler.outputHandler.queue(new PeerMessage(pn, true, true, identifier));
 	}
 
 }

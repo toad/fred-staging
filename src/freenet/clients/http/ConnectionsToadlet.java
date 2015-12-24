@@ -31,6 +31,8 @@ import freenet.node.DarknetPeerNode.FRIEND_VISIBILITY;
 import freenet.node.DarknetPeerNode.FRIEND_TRUST;
 import freenet.node.FSParseException;
 import freenet.node.Node;
+import freenet.node.Node.PeerAdditionException;
+import freenet.node.Node.PeerAdditionReturnCode;
 import freenet.node.NodeClientCore;
 import freenet.node.NodeStats;
 import freenet.node.PeerManager;
@@ -163,8 +165,6 @@ public abstract class ConnectionsToadlet extends Toadlet {
 	protected final PeerManager peers;
 	protected boolean isReversed = false;
 	protected boolean showTrivialFoafConnections = false;
-
-	public enum PeerAdditionReturnCodes{ OK, WRONG_ENCODING, CANT_PARSE, INTERNAL_ERROR, INVALID_SIGNATURE, TRY_TO_ADD_SELF, ALREADY_IN_REFERENCE}
 
 	protected ConnectionsToadlet(Node n, NodeClientCore core, HighLevelSimpleClient client) {
 		super(client);
@@ -720,10 +720,16 @@ public abstract class ConnectionsToadlet extends Toadlet {
 				// Don't need to add a newline at the end, we will do that later.
 			}
 			//The peer's additions results
-			Map<PeerAdditionReturnCodes,Integer> results=new HashMap<PeerAdditionReturnCodes, Integer>();
+			Map<PeerAdditionReturnCode,Integer> results=new HashMap<PeerAdditionReturnCode, Integer>();
 			for(int i=0;i<nodesToAdd.length;i++){
 				//We need to trim then concat 'End' to the node's reference, this way we have a normal reference(the split() removes the 'End'-s!)
-				PeerAdditionReturnCodes result=addNewNode(nodesToAdd[i].trim().concat("\nEnd"), privateComment, trust, visibility);
+			    PeerAdditionReturnCode result;
+			    try { 
+			        node.addNewNode(nodesToAdd[i].trim().concat("\nEnd"), privateComment, trust, visibility, isOpennet());
+			        result = PeerAdditionReturnCode.OK;
+			    } catch (PeerAdditionException e) {
+			        result = e.failureCode;
+			    }
 				//Store the result
 				Integer prev = results.get(result);
 				if(prev == null) prev = Integer.valueOf(0);
@@ -740,10 +746,10 @@ public abstract class ConnectionsToadlet extends Toadlet {
 			detailedStatusBox.addChild(new HTMLNode("tr")).addChildren(new HTMLNode[]{new HTMLNode("th",l10n("resultName")),new HTMLNode("th",l10n("numOfResults"))});
 			HTMLNode statusBoxTable=detailedStatusBox.addChild(new HTMLNode("tbody"));
 			//Iterate through the return codes
-			for(PeerAdditionReturnCodes returnCode:PeerAdditionReturnCodes.values()){
+			for(PeerAdditionReturnCode returnCode:PeerAdditionReturnCode.values()){
 				if(results.containsKey(returnCode)){
 					//Add a <tr> and 2 <td> with the name of the code and the number of occasions it happened. If the code is OK, we use green, red elsewhere.
-					statusBoxTable.addChild(new HTMLNode("tr","style","color:"+(returnCode==PeerAdditionReturnCodes.OK?"green":"red"))).addChildren(new HTMLNode[]{new HTMLNode("td",l10n("peerAdditionCode."+returnCode.toString())),new HTMLNode("td",results.get(returnCode).toString())});
+					statusBoxTable.addChild(new HTMLNode("tr","style","color:"+(returnCode==PeerAdditionReturnCode.OK?"green":"red"))).addChildren(new HTMLNode[]{new HTMLNode("td",l10n("peerAdditionCode."+returnCode.toString())),new HTMLNode("td",results.get(returnCode).toString())});
 				}
 			}
 
@@ -760,57 +766,6 @@ public abstract class ConnectionsToadlet extends Toadlet {
 		
 	}
 	
-	/** Adds a new node. If any error arises, it returns the appropriate return code.
-	 * @param nodeReference - The reference to the new node
-	 * @param privateComment - The private comment when adding a Darknet node
-	 * @param trust 
-	 * @param request To pull any extra fields from
-	 * @return The result of the addition*/
-	private PeerAdditionReturnCodes addNewNode(String nodeReference,String privateComment, FRIEND_TRUST trust, FRIEND_VISIBILITY visibility){
-		SimpleFieldSet fs;
-		
-		try {
-			nodeReference = Fields.trimLines(nodeReference);
-			fs = new SimpleFieldSet(nodeReference, false, true, true);
-			if(!fs.getEndMarker().endsWith("End")) {
-				Logger.error(this, "Trying to add noderef with end marker \""+fs.getEndMarker()+"\"");
-				return PeerAdditionReturnCodes.WRONG_ENCODING;
-			}
-			fs.setEndMarker("End"); // It's always End ; the regex above doesn't always grok this
-		} catch (IOException e) {
-            Logger.error(this, "IOException adding reference :" + e.getMessage(), e);
-			return PeerAdditionReturnCodes.CANT_PARSE;
-		} catch (Throwable t) {
-		    Logger.error(this, "Internal error adding reference :" + t.getMessage(), t);
-			return PeerAdditionReturnCodes.INTERNAL_ERROR;
-		}
-		PeerNode pn;
-		try {
-			if(isOpennet()) {
-				pn = node.createNewOpennetNode(fs);
-			} else {
-				pn = node.createNewDarknetNode(fs, trust, visibility);
-				((DarknetPeerNode)pn).setPrivateDarknetCommentNote(privateComment);
-			}
-		} catch (FSParseException e1) {
-			return PeerAdditionReturnCodes.CANT_PARSE;
-		} catch (PeerParseException e1) {
-			return PeerAdditionReturnCodes.CANT_PARSE;
-		} catch (ReferenceSignatureVerificationException e1){
-			return PeerAdditionReturnCodes.INVALID_SIGNATURE;
-		} catch (Throwable t) {
-            Logger.error(this, "Internal error adding reference :" + t.getMessage(), t);
-			return PeerAdditionReturnCodes.INTERNAL_ERROR;
-		}
-		if(Arrays.equals(pn.getPeerECDSAPubKeyHash(), node.getDarknetPubKeyHash())) {
-			return PeerAdditionReturnCodes.TRY_TO_ADD_SELF;
-		}
-		if(!this.node.addPeerConnection(pn)) {
-			return PeerAdditionReturnCodes.ALREADY_IN_REFERENCE;
-		}
-		return PeerAdditionReturnCodes.OK;
-	}
-
 	/** Adding a darknet node or an opennet node? */
 	protected abstract boolean isOpennet();
 

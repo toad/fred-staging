@@ -27,6 +27,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -4490,6 +4491,83 @@ public class Node implements TimeSkewDetectorCallback {
 		if(opennet == null) return null;
 		return opennet.addNewOpennetNode(fs, connectionType, false);
 	}
+
+	public class PeerAdditionException extends Exception {
+        private static final long serialVersionUID = 1L;
+
+        public PeerAdditionException(PeerAdditionReturnCode code) {
+            // Not used for exceptions, but useful for callers.
+            assert(code != PeerAdditionReturnCode.OK);
+	        this.failureCode = code;
+        }
+
+        public PeerAdditionException(PeerAdditionReturnCode code, Throwable t) {
+            super(t.getMessage());
+            // Not used for exceptions, but useful for callers.
+            assert(code != PeerAdditionReturnCode.OK);
+            this.failureCode = code;
+            this.initCause(t);
+        }
+
+        public final PeerAdditionReturnCode failureCode;
+	}
+	
+	public enum PeerAdditionReturnCode { OK, WRONG_ENCODING, CANT_PARSE, INTERNAL_ERROR, INVALID_SIGNATURE, TRY_TO_ADD_SELF, ALREADY_IN_REFERENCE}
+
+	   /** Adds a new node. If any error arises, it returns the appropriate return code.
+     * @param nodeReference - The reference to the new node
+     * @param privateComment - The private comment when adding a Darknet node
+     * @param trust 
+     * @param request To pull any extra fields from
+     * @return The result of the addition*/
+    public PeerNode addNewNode(String nodeReference,String privateComment, FRIEND_TRUST trust, FRIEND_VISIBILITY visibility, boolean isOpennet) throws PeerAdditionException {
+        SimpleFieldSet fs;
+        
+        try {
+            nodeReference = Fields.trimLines(nodeReference);
+            fs = new SimpleFieldSet(nodeReference, false, true, true);
+            if(!fs.getEndMarker().endsWith("End")) {
+                Logger.error(this, "Trying to add noderef with end marker \""+fs.getEndMarker()+"\"");
+                throw new PeerAdditionException(PeerAdditionReturnCode.WRONG_ENCODING);
+            }
+            fs.setEndMarker("End"); // It's always End ; the regex above doesn't always grok this
+        } catch (IOException e) {
+            Logger.error(this, "IOException adding reference :" + e.getMessage(), e);
+            throw new PeerAdditionException(PeerAdditionReturnCode.CANT_PARSE, e);
+        } catch (Throwable t) {
+            Logger.error(this, "Internal error adding reference :" + t.getMessage(), t);
+            throw new PeerAdditionException(PeerAdditionReturnCode.INTERNAL_ERROR, t);
+        }
+        return addNewNode(fs, privateComment, trust, visibility, isOpennet);
+    }
+    
+    public PeerNode addNewNode(SimpleFieldSet fs,String privateComment, FRIEND_TRUST trust, FRIEND_VISIBILITY visibility, boolean isOpennet) throws PeerAdditionException {
+        PeerNode pn;
+        try {
+            if(isOpennet) {
+                pn = createNewOpennetNode(fs);
+            } else {
+                pn = createNewDarknetNode(fs, trust, visibility);
+                ((DarknetPeerNode)pn).setPrivateDarknetCommentNote(privateComment);
+            }
+        } catch (FSParseException e1) {
+            throw new PeerAdditionException(PeerAdditionReturnCode.CANT_PARSE, e1);
+        } catch (PeerParseException e1) {
+            throw new PeerAdditionException(PeerAdditionReturnCode.CANT_PARSE, e1);
+        } catch (ReferenceSignatureVerificationException e1){
+            throw new PeerAdditionException(PeerAdditionReturnCode.INVALID_SIGNATURE);
+        } catch (Throwable t) {
+            Logger.error(this, "Internal error adding reference :" + t.getMessage(), t);
+            throw new PeerAdditionException(PeerAdditionReturnCode.INTERNAL_ERROR, t);
+        }
+        if(Arrays.equals(pn.getPeerECDSAPubKeyHash(), getDarknetPubKeyHash())) {
+            throw new PeerAdditionException(PeerAdditionReturnCode.TRY_TO_ADD_SELF);
+        }
+        if(!addPeerConnection(pn)) {
+            throw new PeerAdditionException(PeerAdditionReturnCode.ALREADY_IN_REFERENCE);
+        }
+        return pn;
+    }
 
 	public byte[] getOpennetPubKeyHash() {
 		return opennet.crypto.ecdsaPubKeyHash;

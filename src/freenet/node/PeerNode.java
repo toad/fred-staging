@@ -5836,8 +5836,7 @@ public abstract class PeerNode implements USKRetrieverCallback, BasePeerNode, Pe
 	    return peerECDSAPubKeyHash;
 	}
 
-	// FIXME Move callers into freenet/node/ (or copy the byte[]).
-    public byte[] getPeerECDSAPubKeyHash() {
+    protected byte[] getPeerECDSAPubKeyHash() {
         return peerECDSAPubKeyHash;
     }
 }
