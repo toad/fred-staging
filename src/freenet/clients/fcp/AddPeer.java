@@ -142,7 +142,7 @@ public class AddPeer extends FCPMessage {
 		boolean isOpennetRef = fs.getBoolean("opennet", false);
 		try {
 		    pn = node.addNewNode(fs, "", trust, visibility, isOpennetRef);
-            handler.outputHandler.queue(new PeerMessage(pn, true, true, identifier));
+            handler.send(new PeerMessage(pn, true, true, identifier));
 		} catch (PeerAdditionException e) {
 		    switch(e.failureCode) {
 	        case ALREADY_IN_REFERENCE:
