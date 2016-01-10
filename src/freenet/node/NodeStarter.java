@@ -451,6 +451,7 @@ public class NodeStarter implements WrapperListener {
         public boolean useSlashdotCache;
         public String ipAddressOverride = "127.0.0.1";
         public boolean enableFCP;
+<<<<<<< HEAD
         /** True to write everything to the datastore. By default, we only cache requests with HTL 
          * at least 3 below the maximum, see Node.canWriteDatastoreInsert(). This is a security
          * setting that makes sense for large networks. For simulations we can either cache 
@@ -462,6 +463,9 @@ public class NodeStarter implements WrapperListener {
         public int bypassCBRBandwidthLimit = 1000;
         /** Simulate per-link one-way transport latency */
         public int bypassCBRDelay = 100;
+=======
+        public boolean enablePlugins;
+>>>>>>> plugins-disable
     }
 
     /**
@@ -551,6 +555,7 @@ public class NodeStarter implements WrapperListener {
         configFS.put("fcp.enabled", params.enableFCP);
 		configFS.put("fcp.port", 9481);
 		configFS.put("fcp.ssl", false);
+		configFS.put("pluginmanager.enabled", params.enablePlugins);
 		configFS.put("console.enabled", false);
 		configFS.putSingle("pluginmanager.loadplugin", "");
 		configFS.put("node.updater.enabled", false);
