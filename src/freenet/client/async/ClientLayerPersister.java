@@ -112,10 +112,7 @@ public class ClientLayerPersister extends PersistentJobRunnerImpl {
         Logger.registerClass(ClientLayerPersister.class);
     }
     
-    /** Load everything.
-     * @param persistentTempFactory Only passed in so that we can call its pre- and post- commit
-     * hooks. We don't explicitly save it; it must be populated lazily in onResume() like 
-     * everything else. */
+    /** Load everything. */
     public ClientLayerPersister(Executor executor, Ticker ticker, Node node, NodeClientCore core,
             PersistentTempBucketFactory persistentTempFactory, TempBucketFactory tempBucketFactory,
             PersistentStatsPutter stats) {
