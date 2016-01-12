@@ -317,7 +317,7 @@ public class NewPacketFormat implements PacketFormat {
 		NewPacketFormatKeyContext keyContext = sessionKey.packetContext;
 		// Create the watchlist if the key has changed
 		if(keyContext.seqNumWatchList == null) {
-			if(logMINOR) Logger.minor(this, "Creating watchlist starting at " + keyContext.watchListOffset);
+			if(logMINOR) Logger.minor(this, "Creating watchlist starting at " + keyContext.watchListOffset+" for "+sessionKey);
 			
 			keyContext.seqNumWatchList = new byte[NUM_SEQNUMS_TO_WATCH_FOR][4];
 
