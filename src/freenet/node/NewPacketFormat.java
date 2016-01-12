@@ -314,6 +314,7 @@ public class NewPacketFormat implements PacketFormat {
 	}
 
 	private NPFPacket tryDecipherPacket(byte[] buf, int offset, int length, SessionKey sessionKey) {
+	    if(logMINOR) Logger.minor(this, "Trying to decipher with "+sessionKey);
 		NewPacketFormatKeyContext keyContext = sessionKey.packetContext;
 		// Create the watchlist if the key has changed
 		if(keyContext.seqNumWatchList == null) {
