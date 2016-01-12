@@ -20,6 +20,7 @@ import freenet.io.comm.Peer.LocalAddressException;
 import freenet.io.xfer.PacketThrottle;
 import freenet.node.NewPacketFormatKeyContext.AddedAcks;
 import freenet.support.Fields;
+import freenet.support.HexUtil;
 import freenet.support.LogThresholdCallback;
 import freenet.support.Logger;
 import freenet.support.Logger.LogLevel;
@@ -399,6 +400,7 @@ public class NewPacketFormat implements PacketFormat {
 		byte[] payload = Arrays.copyOfRange(buf, offset + hmacLength, offset + length);
 		byte[] hash = Arrays.copyOfRange(buf, offset, offset + hmacLength);
 
+		if(logMINOR) Logger.minor(this, "Verifying packet hash:\n"+HexUtil.bytesToHex(hash)+" with HMAC key:\n"+HexUtil.bytesToHex(sessionKey.hmacKey)+" payload\n"+HexUtil.bytesToHex(payload));
 		if(!HMAC.verifyWithSHA256(sessionKey.hmacKey, payload, hash)) return null;
 
 		PCFBMode payloadCipher = PCFBMode.create(sessionKey.incommingCipher, IV);
@@ -509,6 +511,8 @@ public class NewPacketFormat implements PacketFormat {
 		System.arraycopy(data, hmacLength, text, 0, text.length);
 
 		byte[] hash = HMAC.macWithSHA256(sessionKey.hmacKey, text);
+
+        if(logMINOR) Logger.minor(this, "Created packet hash:\n"+HexUtil.bytesToHex(hash)+" with HMAC key:\n"+HexUtil.bytesToHex(sessionKey.hmacKey)+" payload\n"+HexUtil.bytesToHex(text));
 
 		System.arraycopy(hash, 0, data, 0, hmacLength);
 
