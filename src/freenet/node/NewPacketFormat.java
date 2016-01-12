@@ -401,7 +401,7 @@ public class NewPacketFormat implements PacketFormat {
 		byte[] hash = Arrays.copyOfRange(buf, offset, offset + hmacLength);
 
 		if(logMINOR) Logger.minor(this, "Verifying packet hash:\n"+HexUtil.bytesToHex(hash)+" with HMAC key:\n"+HexUtil.bytesToHex(sessionKey.hmacKey)+" payload\n"+HexUtil.bytesToHex(payload));
-		if(!HMAC.verifyWithSHA256(sessionKey.hmacKey, payload, hash)) return null;
+		if(!HMAC.verifyWithSHA256(sessionKey.hmacKey, payload, hash, HMAC_LENGTH)) return null;
 
 		PCFBMode payloadCipher = PCFBMode.create(sessionKey.incommingCipher, IV);
 		payloadCipher.blockDecipher(payload, 0, payload.length);
