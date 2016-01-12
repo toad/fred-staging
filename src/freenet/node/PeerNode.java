@@ -2148,7 +2148,9 @@ public abstract class PeerNode implements USKRetrieverCallback, BasePeerNode, Pe
 		}
 		if(throttle != null) throttle.maybeDisconnected();
 		Logger.normal(this, "Completed handshake with " + this + " on " + replyTo + " - current: " + currentTracker +
-			" old: " + previousTracker + " unverified: " + unverifiedTracker + " bootID: " + thisBootID + (bootIDChanged ? "(changed) " : "") + " for " + shortToString());
+			" old: " + previousTracker + " unverified: " + unverifiedTracker + " bootID: " + thisBootID +
+			(bootIDChanged ? "(changed) " : "") + " our ISN " + ourInitialSeqNum + " their ISN " + 
+			theirInitialSeqNum + " for " + shortToString());
 
 		setPeerNodeStatus(now);
 
