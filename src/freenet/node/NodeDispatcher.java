@@ -1007,7 +1007,7 @@ public class NodeDispatcher implements Dispatcher, Runnable {
 
 	void start(NodeStats stats) {
 		this.nodeStats = stats;
-		node.executor.execute(queueRunner);
+		node.executor.execute(queueRunner, "Request dispatcher for "+node.getDarknetPortNumber());
 	}
 
 	public static String peersUIDsToString(long[] peerUIDs, double[] peerLocs) {
