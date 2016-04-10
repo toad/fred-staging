@@ -45,6 +45,8 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
     static int DEGREE = 10;
     /** Number of requests to run in parallel */
     static int PARALLEL_REQUESTS = 5;
+    /** Number of inserts to run in parallel */
+    static int PARALLEL_INSERTS = PARALLEL_REQUESTS;
     /** Do not record statistics until this many requests have completed. */
     static int NO_STATS_BEFORE = PARALLEL_REQUESTS*4;
     /** Pre-insert this far ahead. Inserts take longer than requests, so there should be some gap
@@ -117,6 +119,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
         }
         NO_STATS_BEFORE = PARALLEL_REQUESTS*4;
         INSERT_REQUEST_GAP = PARALLEL_REQUESTS*5;
+        PARALLEL_INSERTS = PARALLEL_REQUESTS;
     }
 
     private static void printUsage() {
@@ -242,6 +245,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	private int startedInserts=-1;
 	/** Number of requests running at present. Inserts are not included in this counter. */
 	private int runningRequests = 0;
+	private int runningInserts = 0;
 	/** Total number of requests completed so far, after the prolog phase. Equal to 
 	 * requestSuccess.countReports(). */
 	private int loggedRequests = 0;
@@ -262,6 +266,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
     protected int insertRequestTest() throws InterruptedException, UnsupportedEncodingException, CHKEncodeException, InvalidCompressionCodecException {
         startedInserts++;
         waitForFreeRequestSlot();
+        waitForFreeInsertSlot();
         // Key to fetch.
         int requestID = startedInserts - INSERT_REQUEST_GAP - NO_STATS_BEFORE;
         // Pre-insert.
@@ -435,6 +440,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
         Logger.normal(this, "Starting insert "+req);
         InsertWrapper insert = new InsertWrapper(req);
         synchronized(this) {
+            runningInserts++;
             inserts.put(req, insert);
         }
         insert.start();
@@ -486,4 +492,9 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
         System.out.println("Parallel requests: "+runningRequests);
     }
 	
+    private synchronized void waitForFreeInsertSlot() throws InterruptedException {
+        while(runningInserts >= PARALLEL_INSERTS)
+            wait();
+    }
+    
 }
