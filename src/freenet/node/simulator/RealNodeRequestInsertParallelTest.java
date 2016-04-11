@@ -235,30 +235,27 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	private final int targetSuccesses;
 	private final TimeRunningAverage averageRunningRequests = new TimeRunningAverage();
 	private final TrivialRunningAverage sampledAverageRunningRequests = new TrivialRunningAverage();
-	private class Averager implements PrioRunnable {
-	    private final Ticker ticker;
+	private class Averager extends NativeThread {
 
-	    Averager(Ticker ticker) {
-	        this.ticker = ticker;
-	    }
-	    
-	    public void start() {
-	        ticker.queueTimedJob(this, 0);
+	    Averager() {
+	        super("Average sampler", NativeThread.MAX_PRIORITY, true);
 	    }
 	    
         @Override
-        public void run() {
-            synchronized(RealNodeRequestInsertParallelTest.this) {
-                sampledAverageRunningRequests.report(runningRequests);
+        public void realRun() {
+            while(true) {
+                synchronized(RealNodeRequestInsertParallelTest.this) {
+                    int rr = runningRequests;
+                    sampledAverageRunningRequests.report(rr);
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    return; // Shutting down.
+                }
             }
-            ticker.queueTimedJob(this, 100);
         }
 
-        @Override
-        public int getPriority() {
-            return NativeThread.MAX_PRIORITY;
-        }
-	    
 	}
 	private final TrivialRunningAverage averageRequestTime = new TrivialRunningAverage();
 	private final TrivialRunningAverage averageInsertTime = new TrivialRunningAverage();
@@ -290,7 +287,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	 * */
     protected int insertRequestTest() throws InterruptedException, UnsupportedEncodingException, CHKEncodeException, InvalidCompressionCodecException {
         if(startedInserts == 0) {
-            new Averager(nodes[0].ticker).start();
+            new Averager().start();
         }
         startedInserts++;
         waitForFreeRequestSlot();
