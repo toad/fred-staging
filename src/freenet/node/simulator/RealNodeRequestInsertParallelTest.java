@@ -24,14 +24,17 @@ import freenet.keys.SSKEncodeException;
 import freenet.node.Node;
 import freenet.node.NodeStarter.TestNodeParameters;
 import freenet.node.NodeStarter.TestingVMBypass;
+import freenet.node.PrioRunnable;
 import freenet.node.simulator.SimulatorRequestTracker.Request;
 import freenet.support.Executor;
 import freenet.support.HexUtil;
 import freenet.support.Logger;
 import freenet.support.PrioritizedTicker;
+import freenet.support.Ticker;
 import freenet.support.compress.Compressor.COMPRESSOR_TYPE;
 import freenet.support.compress.InvalidCompressionCodecException;
 import freenet.support.io.ArrayBucket;
+import freenet.support.io.NativeThread;
 import freenet.support.math.SimpleSampleStatistics;
 import freenet.support.math.TimeRunningAverage;
 import freenet.support.math.TrivialRunningAverage;
@@ -231,6 +234,31 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	private int insertsFailedAtLeastOnce = 0;
 	private final int targetSuccesses;
 	private final TimeRunningAverage averageRunningRequests = new TimeRunningAverage();
+	private final TrivialRunningAverage sampledAverageRunningRequests = new TrivialRunningAverage();
+	private class Averager implements PrioRunnable {
+	    private final Ticker ticker;
+
+	    Averager(Ticker ticker) {
+	        this.ticker = ticker;
+	    }
+	    
+	    public void start() {
+	        ticker.queueTimedJob(this, 0);
+	    }
+	    
+        @Override
+        public synchronized void run() {
+            int rr = runningRequests;
+            sampledAverageRunningRequests.report(rr);
+            ticker.queueTimedJob(this, 100);
+        }
+
+        @Override
+        public int getPriority() {
+            return NativeThread.MAX_PRIORITY;
+        }
+	    
+	}
 	private final TrivialRunningAverage averageRequestTime = new TrivialRunningAverage();
 	private final TrivialRunningAverage averageInsertTime = new TrivialRunningAverage();
 	/** Number of times waitForInsert(req) has had to sleep */
@@ -260,6 +288,9 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	 * @throws UnsupportedEncodingException 
 	 * */
     protected int insertRequestTest() throws InterruptedException, UnsupportedEncodingException, CHKEncodeException, InvalidCompressionCodecException {
+        if(startedInserts == 0) {
+            new Averager(nodes[0].ticker).start();
+        }
         startedInserts++;
         waitForFreeRequestSlot();
         // Key to fetch.
@@ -283,6 +314,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
                 averageInsertTime.reset();
                 synchronized(this) {
                     averageRunningRequests.reset(System.currentTimeMillis(), runningRequests);
+                    sampledAverageRunningRequests.reset();
                 }
             }
             startFetch(requestID, key, shouldLog(requestID));
@@ -300,6 +332,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
         System.err.println("Average request success: "+requestSuccess.mean()+" +/- "+requestSuccess.stddev());
         System.err.println("Inserts failed: "+insertsFailedAtLeastOnce);
         System.err.println("Average requests started: "+averageRunningRequests.currentValue());
+        System.err.println("Average requests started (sampled): "+sampledAverageRunningRequests.currentValue());
         System.err.println("Waited for loggable inserts: "+waitForInsertSlept);
         System.err.println("Average request time: "+averageRequestTime.currentValue());
         System.err.println("Average insert time: "+averageInsertTime.currentValue());
