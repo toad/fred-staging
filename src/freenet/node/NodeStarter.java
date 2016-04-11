@@ -469,6 +469,7 @@ public class NodeStarter implements WrapperListener {
         public boolean lazyStartDatastoreChecker = true;
         public RequestTrackerSnooper requestTrackerSnooper = null;
         public int randomReinsertInterval = Node.DEFAULT_RANDOM_REINSERT_INTERVAL;
+        public boolean enableRandomRouting = false;
     }
 
     /**
@@ -556,6 +557,7 @@ public class NodeStarter implements WrapperListener {
         configFS.put("node.disableProbabilisticHTLs", params.disableProbabilisticHTLs);
 		configFS.put("fproxy.enabled", false);
         configFS.put("fcp.enabled", params.enableFCP);
+        configFS.put("node.enableRandomRouting", params.enableRandomRouting);
 		configFS.put("fcp.port", 9481);
 		configFS.put("fcp.ssl", false);
 		configFS.put("pluginmanager.enabled", params.enablePlugins);
