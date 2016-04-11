@@ -247,9 +247,10 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
 	    }
 	    
         @Override
-        public synchronized void run() {
-            int rr = runningRequests;
-            sampledAverageRunningRequests.report(rr);
+        public void run() {
+            synchronized(RealNodeRequestInsertParallelTest.this) {
+                sampledAverageRunningRequests.report(runningRequests);
+            }
             ticker.queueTimedJob(this, 100);
         }
 
