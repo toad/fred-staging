@@ -60,6 +60,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
     static final boolean ENABLE_PER_NODE_FAILURE_TABLES = false;
     static final boolean ENABLE_SWAP_QUEUEING = false;
     static final boolean ENABLE_PACKET_COALESCING = true;
+    static final boolean ENABLE_RANDOM_ROUTING = false;
     static final boolean ENABLE_FOAF = true;
     /* On a real, large network, we cache only at HTL well below the maximum, for security reasons.
      * For a simulation, this is problematic! Two solutions for smaller networks:
@@ -195,6 +196,7 @@ public abstract class RealNodeRequestInsertParallelTest extends RealNodeRoutingT
         params.bypassCBRBandwidthLimit = CBR_BWLIMIT;
         if(DISABLE_RANDOM_REINSERT)
             params.randomReinsertInterval = 0;
+        params.enableRandomRouting = ENABLE_RANDOM_ROUTING;
         return params;
     }
 
