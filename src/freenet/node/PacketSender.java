@@ -48,7 +48,7 @@ public class PacketSender implements Runnable {
 	 * Note that we will send the data immediately anyway because it will normally be big
 	 * enough to send a full packet. However this impacts the choice of whether to send
 	 * realtime or bulk data, see PeerMessageQueue.addMessages(). */
-	static final long MAX_COALESCING_DELAY_BULK = SECONDS.toMillis(5);
+	static final long MAX_COALESCING_DELAY_BULK = MILLISECONDS.toMillis(500);
 	/** If opennet is enabled, and there are fewer than this many connections,
 	 * we MAY attempt to contact old opennet peers (opennet peers we have
 	 * dropped from the routing table but kept around in case we can't connect). */
