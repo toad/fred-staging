@@ -47,7 +47,7 @@ public class NodeAndClientLayerBlobTest extends NodeAndClientLayerTestBase {
         FileUtil.removeAll(dir);
         dir.mkdir();
         NodeStarter.globalTestInit(dir, false, 
-                Logger.LogLevel.ERROR, "", true, random);
+                Logger.LogLevel.ERROR, "", true, NodeStarter.TestingVMBypass.NONE, random);
         TestNodeParameters params = new TestNodeParameters();
         params.random = new DummyRandomSource(253121);
         params.ramStore = true;

@@ -113,14 +113,8 @@ public class PluginManager {
 		executor = new SerialExecutor(PriorityLevel.NORM_PRIORITY.value);
 		executor.start(node.executor, "PM callback executor");
 
-<<<<<<< HEAD
-        pmconfig = node.config.createSubConfig("pluginmanager");
-		
-		pmconfig.register("enabled", true, 0, true, true, "PluginManager.enabled", "PluginManager.enabledLong", new BooleanCallback() {
-=======
         SubConfig pmconfig = node.config.createSubConfig("pluginmanager");
         pmconfig.register("enabled", true, 0, true, true, "PluginManager.enabled", "PluginManager.enabledLong", new BooleanCallback() {
->>>>>>> next
 
             @Override
             public synchronized Boolean get() {
@@ -136,37 +130,7 @@ public class PluginManager {
 		    
 		});
 		enabled = pmconfig.getBoolean("enabled");
-		
-<<<<<<< HEAD
-//		pmconfig.register("configfile", "fplugins.ini", 9, true, true, "PluginConfig.configFile", "PluginConfig.configFileLong",
-//				new StringCallback() {
-//			public String get() {
-//				return configFile;
-//			}
-//
-//			public void set(String val) throws InvalidConfigValueException {
-//				configFile = val;
-//			}
-//		});
-//		configFile = pmconfig.getString("configfile");
-//		pmconfig.register("installdir", "fplugins", 9, true, true, "PluginConfig.installDir", "PluginConfig.installDirLong",
-//				new StringCallback() {
-//			public String get() {
-//				return installDir;
-//				//return getConfigLoadString();
-//			}
-//
-//			public void set(String val) throws InvalidConfigValueException {
-//				installDir = val;
-//				//if(storeDir.equals(new File(val))) return;
-//				// FIXME
-//				//throw new InvalidConfigValueException(NodeL10n.getBase().getString("PluginManager.cannotSetOnceLoaded"));
-//			}
-//		});
-//		installDir = pmconfig.getString("installdir");
 
-=======
->>>>>>> next
 		// Start plugins in the config
 		pmconfig.register("loadplugin", null, 0, true, false, "PluginManager.loadedOnStartup", "PluginManager.loadedOnStartupLong",
 			new StringArrCallback() {

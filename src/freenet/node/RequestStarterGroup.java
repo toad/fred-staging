@@ -18,11 +18,7 @@ import freenet.support.Logger;
 import freenet.support.Logger.LogLevel;
 import freenet.support.SimpleFieldSet;
 import freenet.support.TimeUtil;
-<<<<<<< HEAD
-import freenet.support.Logger.LogLevel;
 import freenet.support.api.BooleanCallback;
-=======
->>>>>>> next
 import freenet.support.api.StringCallback;
 import freenet.support.math.BootstrappingDecayingRunningAverage;
 

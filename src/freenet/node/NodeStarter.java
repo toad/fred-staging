@@ -30,11 +30,8 @@ import freenet.support.Logger;
 import freenet.support.Logger.LogLevel;
 import freenet.support.LoggerHook.InvalidThresholdException;
 import freenet.support.PooledExecutor;
-<<<<<<< HEAD
 import freenet.support.PrioritizedTicker;
-=======
 import freenet.support.ProcessPriority;
->>>>>>> next
 import freenet.support.SimpleFieldSet;
 import freenet.support.Ticker;
 import freenet.support.io.NativeThread;
@@ -445,12 +442,8 @@ public class NodeStarter implements WrapperListener {
         public int dropProb;
         public RandomSource random;
         public Executor executor;
-<<<<<<< HEAD
         public PrioritizedTicker ticker;
-        public int threadLimit;
-=======
         public int threadLimit = 500;
->>>>>>> next
         public long storeSize;
         public boolean ramStore;
         public boolean enableSwapping;
