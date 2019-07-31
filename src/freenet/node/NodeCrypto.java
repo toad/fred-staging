@@ -9,20 +9,11 @@ import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
 import java.security.interfaces.ECPublicKey;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.zip.DeflaterOutputStream;
 
-import com.db4o.ObjectContainer;
-import com.db4o.ObjectSet;
-import com.db4o.query.Predicate;
-
 import freenet.crypt.BlockCipher;
-import freenet.crypt.DSAGroup;
-import freenet.crypt.DSAPrivateKey;
-import freenet.crypt.DSAPublicKey;
 import freenet.crypt.ECDSA;
 import freenet.crypt.ECDSA.Curves;
-import freenet.crypt.Global;
 import freenet.crypt.RandomSource;
 import freenet.crypt.SHA256;
 import freenet.crypt.UnsupportedCipherException;
@@ -35,7 +26,6 @@ import freenet.io.comm.UdpSocketHandler;
 import freenet.keys.FreenetURI;
 import freenet.keys.InsertableClientSSK;
 import freenet.support.Base64;
-import freenet.support.Fields;
 import freenet.support.IllegalBase64Exception;
 import freenet.support.Logger;
 import freenet.support.SimpleFieldSet;
@@ -67,12 +57,6 @@ public class NodeCrypto {
 	byte[] identityHashHash;
 	/** Nonce used to generate ?secureid= for fproxy etc */
 	byte[] clientNonce;
-	/** My crypto group */
-	private DSAGroup cryptoGroup;
-	/** My private key */
-	private DSAPrivateKey privKey;
-	/** My public key */
-	private DSAPublicKey pubKey;
 	/** My ECDSA/P256 keypair and context */
 	private ECDSA ecdsaP256;
 	byte[] ecdsaPubKeyHash;
@@ -197,32 +181,11 @@ public class NodeCrypto {
 		anonSetupCipher.initialize(identityHash);
 		identityHashHash = SHA256.digest(identityHash);
 
-		SimpleFieldSet ecdsaSFS = null;
-		SimpleFieldSet dsaSFS = null;
 		try {
-
-			ecdsaSFS = fs.subset("ecdsa");
+			SimpleFieldSet ecdsaSFS = fs.subset("ecdsa");
 			if(ecdsaSFS != null)
 				ecdsaP256 = new ECDSA(ecdsaSFS.subset(ECDSA.Curves.P256.name()), Curves.P256);
-
-			//TODO: remove this once 1471 is mandatory
-			dsaSFS = fs.subset("dsaGroup");
-			if(dsaSFS != null && dsaSFS.toString().length() > 50)
-				cryptoGroup = DSAGroup.create(dsaSFS);
-			dsaSFS = fs.subset("dsaPrivKey");
-			if(dsaSFS != null && dsaSFS.toString().length() > 30)
-				privKey = DSAPrivateKey.create(dsaSFS, cryptoGroup);
-			dsaSFS = fs.subset("dsaPubKey");
-			if(dsaSFS != null && dsaSFS.toString().length() > 30)
-				pubKey = DSAPublicKey.create(dsaSFS, cryptoGroup);
-		} catch (IllegalBase64Exception e) {
-			Logger.error(this, "Caught "+e, e);
-			throw new IOException(e.toString());
 		} catch (FSParseException e) {
-			Logger.error(this, "Caught "+e, e);
-			throw new IOException(e.toString());
-		} catch (IllegalArgumentException e) {
-			// DSAPrivateKey is invalid
 			Logger.error(this, "Caught "+e, e);
 			throw new IOException(e.toString());
 		}
@@ -385,25 +348,10 @@ public class NodeCrypto {
 	SimpleFieldSet exportPublicCryptoFieldSet(boolean forSetup, boolean forAnonInitiator) {
 		SimpleFieldSet fs = new SimpleFieldSet(true);
 		int[] negTypes = packetMangler.supportedNegTypes(true);
-		if(!(forSetup))
-			// Can't change on setup.
-			fs.putSingle("identity", Base64.encode(myIdentity));
 		if(!forSetup) {
 			// These are invariant. They cannot change on connection setup. They can safely be excluded.
-			// we have to return "something" otherwise we break opennet
-			// TODO: remove it once 1471 is mandatory
-			if(pubKey == null)
-				fs.putSingle("dsaPubKey.y", "placeholder");
-			else
-				fs.put("dsaPubKey", pubKey.asFieldSet());
-			if(cryptoGroup == null) {
-				fs.putSingle("dsaGroup.g", "placeholder");
-				fs.putSingle("dsaGroup.p", "placeholder");
-				fs.putSingle("dsaGroup.q", "placeholder");
-			} else {
-				fs.put("dsaGroup", cryptoGroup.asFieldSet());
-			}
 			fs.put("ecdsa", ecdsaP256.asFieldSet(false));
+			fs.putSingle("identity", Base64.encode(myIdentity));
 		}
 		if(!forAnonInitiator) {
 			// Short-lived connections don't need ARK and don't need negTypes either.
@@ -437,9 +385,6 @@ public class NodeCrypto {
 
 	private byte[] myCompressedRef(boolean setup, boolean heavySetup, boolean forARK) {
 		SimpleFieldSet fs = exportPublicFieldSet(setup, heavySetup, forARK);
-		boolean shouldStripGroup = heavySetup;
-		if(shouldStripGroup)
-			fs.removeSubset("dsaGroup");
 
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
 		DeflaterOutputStream gis;
@@ -456,16 +401,9 @@ public class NodeCrypto {
 		byte[] buf = baos.toByteArray();
 		if(buf.length >= 4096)
 			throw new IllegalStateException("We are attempting to send a "+buf.length+" bytes big reference!");
-		byte[] obuf = new byte[buf.length + 1 + (shouldStripGroup ? 1 : 0)];
+		byte[] obuf = new byte[buf.length + 1];
 		int offset = 0;
-		if(shouldStripGroup) {
-			obuf[offset++] = 0x3; // compressed noderef - group
-			int dsaGroupIndex = Global.GROUP_INDEX_BIG_A;
-			if(logMINOR)
-				Logger.minor(this, "We are stripping the group from the reference as it's a known group (groupIndex="+dsaGroupIndex+')');
-			obuf[offset++] = (byte)(dsaGroupIndex & 0xff);
-		} else
-			obuf[offset++] = 0x01; // compressed noderef
+		obuf[offset++] = 0x01; // compressed noderef
 		System.arraycopy(buf, 0, obuf, offset, buf.length);
 		if(logMINOR)
 			Logger.minor(this, "myCompressedRef("+setup+","+heavySetup+") returning "+obuf.length+" bytes");
@@ -499,18 +437,11 @@ public class NodeCrypto {
 
 	void addPrivateFields(SimpleFieldSet fs) {
 	    // Let's not add it twice
-	    fs.removeSubset("ecdsa");
-	    fs.put("ecdsa", ecdsaP256.asFieldSet(true));
+		fs.removeSubset("ecdsa");
+		fs.put("ecdsa", ecdsaP256.asFieldSet(true));
 
-		if(privKey != null)
-			fs.put("dsaPrivKey", privKey.asFieldSet());
 		fs.putSingle("ark.privURI", myARK.getInsertURI().toString(false, false));
 		fs.putSingle("clientNonce", Base64.encode(clientNonce));
-
-	}
-
-	public int getIdentityHash(){
-		return Fields.hashCode(identityHash);
 	}
 
 	/** Sign data with the node's ECDSA key. The data does not need to be hashed, the signing code
@@ -610,13 +541,8 @@ public class NodeCrypto {
 
 	/**
 	 * Get my identity.
-	 * @param unknownInitiator True in JFK(4) for unknownInitiator, false otherwise. 
-	 * Unknown-initiator connections use the hash of the pubkey as the identity to save space in 
-	 * packets 3 and 4. Note that this only applies when we are sending packet 4, i.e. the final 
-	 * reply from the responder to the initiator, thus the responder doesn't need to have the 
-	 * identity. FIXME This complexity can be removed as soon as negType 9 is mandatory!
 	 */
-	public byte[] getIdentity(int negType, boolean unknownInitiator) {
+	public byte[] getIdentity(int negType) {
 	    return ecdsaPubKeyHash;
 	}
 
@@ -630,49 +556,6 @@ public class NodeCrypto {
 
 	public FreenetInetAddress getBindTo() {
 		return config.getBindTo();
-	}
-
-	public long getNodeHandle(ObjectContainer setupContainer) {
-		if(setupContainer == null) return random.nextLong();
-		// Ignore warnings, this is db4o magic.
-		ObjectSet<HandlePortTuple> result = setupContainer.query(new Predicate<HandlePortTuple>() {
-			final private static long serialVersionUID = -5442250371745036389L;
-			@Override
-			public boolean match(HandlePortTuple tuple) {
-				return tuple.portNumber == portNumber;
-			}
-		});
-		long handle;
-		if(result.hasNext()) {
-			handle = result.next().handle;
-			System.err.println("Retrieved database handle for node on port "+portNumber+": "+handle);
-			return handle;
-		} else {
-			while(true) {
-				handle = random.nextLong();
-				final HandlePortTuple newTuple = new HandlePortTuple();
-				newTuple.handle = handle;
-				// Double-check just in case the RNG is broken (similar things have happened before!)
-				ObjectSet<HandlePortTuple> os = setupContainer.query(new Predicate<HandlePortTuple>() {
-					private static final long serialVersionUID = 7850460146922879499L;
-
-					@Override
-					public boolean match(HandlePortTuple tuple) {
-						return tuple.handle == newTuple.handle;
-					}
-				});
-				if(os.hasNext()) {
-					System.err.println("Generating database handle for node: already taken: "+handle);
-					continue;
-				}
-				newTuple.portNumber = portNumber;
-				setupContainer.store(newTuple);
-				setupContainer.commit();
-				if(logMINOR) Logger.minor(this, "COMMITTED");
-				System.err.println("Generated and stored database handle for node on port "+portNumber+": "+handle);
-				return handle;
-			}
-		}
 	}
 
 	public boolean wantAnonAuth() {

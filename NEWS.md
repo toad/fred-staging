@@ -1,14 +1,138 @@
 next ():
 
-- Add a NEWS file
-- Tighten security (Remove DSA and compat code).
-- Only update essential plugins if we have to.
-- Improve translations.
-- Show peer locations, not distance in peer location histogram.
-- Add much more CSS support to the content filter.
-- Fix problems with blank bookmark names. Thanks to _xiaoyu for the report!
-- Fix missing the software category in bookmarks.
-- Sort alerts within a category by time, newest first (including node-to-node messages).
+- increase scaling to 3 again because 1480 nodes otherwise slow down updated nodes
+- plugin manager cleanup: more readable code 
+- new ogg theora, vorbis, flac filter: can show ogg-files! - thanks to Spencer Jackson, finally merged it
+- m3u filter: can stream playlists
+- make winterfacey theme the default
+- update WoT plugin to build 20. Thanks to xor.
+- update Sharesite version to 0.4.7
+- avoid losing download state on restart - thanks to ChristmasMuch from FMS
+- re-apply much less recently failed - thanks to toad
+- only FMS and Sone on ChatForums suggestion page to fit the projects longstanding stance. If you disagree, you can create a freesite to promote it.
+- update included seednodes
+- prevent content sniffing in FF. See CVE-2019-9673 for details. Thanks to thensark and operhiem1
+- remove the 1024 limit for node-to-node messages
+- peer list: Add spacing between flag and IP address - Thanks to Bombe
+- replace handler.outputHandler.queue by handler.send - thanks to patheticcockroach
+- add "send confidential message" button to friends page - thanks to Redwerk
+- update plugin Freemail_wot to v0.2.7.4 with better detection of contacts missing from WoT - thanks to Redwerk
+
+1483:
+
+- new default theme: sky static
+- included experimental winterfacey theme
+- switch to gradle with witness as build system
+- run in background mode
+- switch from jni to jna
+- Override list request identifier
+- use fallocate
+- ipv6 fixes
+- fix warnings
+- optimization
+- Persist "Bookmark Updated" notifications across restarts
+- minimum bandwidth increased to 10KiB again
+- undo update of pinned SSL certificates (site no longer exists)
+
+1480:
+
+- Ship new Windows Installer and Tray
+- Update Freemail to v0.2.7.3-r2
+
+1479:
+
+- optimized network settings for the new structure since the link
+  length fix : less peers for the same bandwidth should result in
+  higher throughput per connection. This allows for less powerful
+  devices to join (with low bandwidth settings) and should provide
+  better bandwidth utilization for very fast nodes.
+- Re-enable RSA-based ciphers for SSL-connections to the node
+
+- add jfniki index bookmark (use "add default bookmarks" to get it)
+- l10n: pull translations from transifex
+
+- plugins: WebOfTrust build0019,
+  Changelog: https://github.com/freenet/plugin-WebOfTrust/releases/tag/build0019
+  source available at
+  CHK@gt~foMPFR5ZAhOhSOsFw68f5PBjJuCYpe~ZXPPA1t6g,pk7h34mG5hRsBPhVFWr5UllVbJXU-PS7tC9rbILvoOk,AAMC--8/WebOfTrust-build0019-source.tar.bz2
+- plugins: Freemail v0.2.7.3 (new translations)
+  source available at
+  CHK@ZOfWMdsxhS1Lg6QKWK4CJZvVt9RYkkjFnU6-PCizHbg,zfTEQX6DexdUm9-eGyDSP5vKvp76b38SCBS7W9zkoGE,AAMC--8/Freemail-v0.2.7.3-source.tar.bz2
+
+1478 (2017-04-05):
+
+- prepare pinned certs for the new Amazon-web-services based site.
+
+1477 (2017-03-09):
+
+- fix a potential clickjacking vulnerability in legacy browsers
+- patch open redirect and header injection vulnerability introduced in 1476
+- SSL with RSA certificates on fproxy has been broken in 1475, fix that
+
+1476 (2017-03-02):
+
+- FOAF efficiency enhancements for fast nodes
+- gif filter
+- harden the SSL configuration of fproxy
+- logger fix
+- spare bitmap efficiency optimization
+- reduce custom code
+- show semi-persistent update info next to bookmarks
+- plugin updates: Sharesite 0.4.4, Library v37, Freereader 6
+
+1475 (2016-06-25):
+
+- 0006745: Disk crypto: Should type password twice when setting it
+- 0006344: Change default compatibility mode to COMPAT_1466
+- 0006488: using “visit freesite” to visit a freesite with a hash (#) fails instead of opening it and jumping to the anchor.
+- fix a critical bug: prevent announcement loops
+- drop support for negtype9 (non-cummulative ack logic)
+- start to warn user that java7 is EOL
+- PluginInfoMessage: Fix wrong "does not provide FCP" info about plugins
+- Stop warning users that java9 isn't recent enough
+- Don't use FOAF if the HTL isn't high enough
+- Attempt to update update.sh
+- l10n improvements
+- cooldown improvements
+- load-limiting changes (token buckets)
+- MessageFilter improvements
+- relax the CSS parser (see https://github.com/freenet/fred/pull/446)
+- support for HTML Audio tags
+- ask/confirm the disk-crypto password in the wizard
+- make the paste-a-key control usable on the WelcomeToadlet
+- the default compatibility mode for inserts is now COMPAT_CURRENT
+- remove the DSA related parameters from noderefs
+- Fix a major bug that might explain the poor connectivity since 1473
+
+1473 (2016-05-22):
+
+- MP3 filter fixes
+- Reduce test memory usage
+- Fix opennet announcements not having location set
+- Fix binary blob download over FCP
+- Add The Filtered Index to the default bookmark list
+- Wait for running transfers on RouteNotFound
+- Mark Freenet traffic with QoS
+- Fix handling of filenames with non-ASCII spaces
+
+1472 (2016-03-19):
+
+- Fix uploads stalling when using MAXIMUM physical security.
+- Fix lots of "setNativePriority(X) has failed!", which was caused by a serious thread priority problem. This might fix nodes unexpectedly losing peers.
+- Order alerts within a category by time: if you have lots of messages from darknet peers they will remain nicely sorted.
+- There is now a caching layer which should significantly reduce I/O load.
+- Update WebOfTrust from build 15 to build 18. Its changelogs are separate, but the changes reduce CPU load. Incremental score recomputation requires roughly 3 percent of the time of full recomputation, and queuing trust lists to disk lowers thread usage.
+- Add partial Greek translation.
+- Update German, Bokmål, Brazilian Portuguese, Simplified Chinese, and Traditional Chinese translations.
+- Fix Bokmål localization loading.
+- Remove Gantros Index from the default bookmark list because it stopped updating.
+- Remove Linkageddon from the default bookmark list because it stopped updating.
+- New version of UPnP to fix some instability and compatibility problems. Thanks to 007pig we have a new UPnP plugin in development which supports UPnP2, but it is not yet included.
+- New version of KeyUtils.
+
+1471 (--):
+
+- (skipped)
 
 1470 (2015-08-15):
 

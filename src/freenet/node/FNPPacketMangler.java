@@ -472,7 +472,7 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 			Logger.error(this, "Decrypted auth packet but invalid version: "+version);
 			return;
 		}
-		if(!(negType == 9 || negType == 10)) {
+		if(!(negType == 10)) {
 			if(negType > 10)
 				Logger.error(this, "Unknown neg type: "+negType);
 			else
@@ -532,7 +532,7 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 			Logger.error(this, "Decrypted auth packet but invalid version: "+version);
 			return;
 		}
-		if(!(negType == 9 || negType == 10)) {
+		if(!(negType == 10)) {
 			if(negType > 10)
 				Logger.error(this, "Unknown neg type: "+negType);
 			else
@@ -607,11 +607,11 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 			return;
 		}
 
-		if(negType >= 0 && negType < 9) {
+		if(negType >= 0 && negType < 10) {
 			// negType 0 through 5 no longer supported, used old FNP.
 			Logger.warning(this, "Old neg type "+negType+" not supported");
 			return;
-		} else if (negType == 9 || negType == 10) {
+		} else if (negType == 10) {
 			// negType == 10 => Changes the method of ack encoding (from single-ack to cummulative range acks)
 		    // negType == 9 => Lots of changes:
 		    //      Security fixes:
@@ -1258,7 +1258,7 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 		}
 
 		// verify the signature
-		byte[] toVerify = assembleDHParams(nonceInitiatorHashed, nonceResponder, initiatorExponential, responderExponential, crypto.getIdentity(negType, false), data);
+		byte[] toVerify = assembleDHParams(nonceInitiatorHashed, nonceResponder, initiatorExponential, responderExponential, crypto.getIdentity(negType), data);
 		    if(!ECDSA.verify(Curves.P256, pn.peerECDSAPubKey, sig, toVerify)) {
 	              Logger.error(this, "The ECDSA signature verification has failed!! JFK(3) - "+pn.getPeer());
 	                return;
@@ -1315,9 +1315,6 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 				bootID, hisRef, 0, hisRef.length, outgoingCipher, outgoingKey, incommingCipher,
 				incommingKey, replyTo, true, negType, trackerID, false, false, hmacKey, ivCipher,
 				ivNonce, ourInitialSeqNum, theirInitialSeqNum, ourInitialMsgID, theirInitialMsgID);
-
-		// Set acknowledging method acording to negType
-		pn.setAcknowledgeType(negType);
 		
 		if(newTrackerID > 0) {
 
@@ -1493,7 +1490,7 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 		int dataLen = hisRef.length + 8 + 9;
 		int nonceSize = getNonceSize(negType);
 		int nonceSizeHashed = HASH_LENGTH;
-	    byte[] identity = crypto.getIdentity(negType, unknownInitiator);
+		byte[] identity = crypto.getIdentity(negType);
 		byte[] locallyGeneratedText = new byte[nonceSizeHashed + nonceSize + modulusLength * 2 + identity.length + dataLen + pn.jfkMyRef.length];
 		int bufferOffset = nonceSizeHashed + nonceSize + modulusLength*2;
 		System.arraycopy(jfkBuffer, 0, locallyGeneratedText, 0, bufferOffset);
@@ -1536,8 +1533,6 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 			Logger.normal(this, "Rejecting connection because already have something with the same IP");
 			dontWant = true;
 		}
-		// Set acknowledging method acording to negType
-		pn.setAcknowledgeType(negType);
 
 		// We change the key
 		BlockCipher ivCipher = null;
@@ -2038,7 +2033,7 @@ public class FNPPacketMangler implements OutgoingPacketMangler {
 
 	@Override
 	public int[] supportedNegTypes(boolean forPublic) {
-		return new int[] { 9, 10 };
+		return new int[] { 10 };
 	}
 
 	@Override

@@ -1,10 +1,5 @@
 package freenet.node;
 
-import static java.util.concurrent.TimeUnit.DAYS;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.MINUTES;
-import static java.util.concurrent.TimeUnit.SECONDS;
-
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.Arrays;
@@ -46,6 +41,11 @@ import freenet.support.math.RunningAverage;
 import freenet.support.math.TimeDecayingRunningAverage;
 import freenet.support.math.TrivialRunningAverage;
 
+import static java.util.concurrent.TimeUnit.DAYS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.MINUTES;
+import static java.util.concurrent.TimeUnit.SECONDS;
+
 /** Node (as opposed to NodeClientCore) level statistics. Includes shouldRejectRequest(), but not limited
  * to stuff required to implement that. */
 public class NodeStats implements Persistable, BlockTimeCallback {
@@ -58,7 +58,38 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 		CHK_OFFER_FETCH,
 		SSK_OFFER_FETCH;
 	}
-	
+
+	/** Histogram for request locations. */
+	private static class RequestsByLocation {
+		private final int[] bins;
+		private int count = 0;
+
+		/** Constructs a request location histogram with the given number of bins. */
+		RequestsByLocation(int numBins) {
+			bins = new int[numBins];
+		}
+
+		/** Update the request counts with a request for the given location. */
+		final void report(final double loc) {
+			assert(loc >= 0 && loc < 1.0);
+			final int bin = (int)Math.floor(loc * bins.length);
+			synchronized (this) {
+				bins[bin]++;
+			}
+		}
+
+		/** Get the request count bins. The total request count is placed at position zero of the
+		  * given array. */
+		final int[] getCounts(final int[] total) {
+			final int[] ret = new int[bins.length];
+			synchronized (this) {
+				System.arraycopy(bins, 0, ret, 0, bins.length);
+				total[0] = count;
+			}
+			return ret;
+		}
+	}
+
 	/** Sub-max ping time. If ping is greater than this, we reject some requests. */
 	public static final long DEFAULT_SUB_MAX_PING_TIME = MILLISECONDS.toMillis(700);
 	/** Maximum overall average ping time. If ping is greater than this,
@@ -84,14 +115,13 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 	 * block send time.
 	 */
 	public static final long MAX_INTERREQUEST_TIME = SECONDS.toMillis(10);
+
 	/** Locations of incoming requests */
-	private final int[] incomingRequestsByLoc = new int[10];
-	private int incomingRequestsAccounted = 0;
+	private final RequestsByLocation incomingRequests = new RequestsByLocation(10);
 	/** Locations of outgoing requests */
-	private final int[] outgoingLocalRequestByLoc = new int[10];
-	private int outgoingLocalRequestsAccounted = 0;
-	private final int[] outgoingRequestByLoc = new int[10];
-	private int outgoingRequestsAccounted = 0;
+	private final RequestsByLocation outgoingLocalRequests = new RequestsByLocation(10);
+	private final RequestsByLocation outgoingRequests = new RequestsByLocation(10);
+
 	private volatile long subMaxPingTime;
 	private volatile long maxPingTime;
 
@@ -1545,7 +1575,7 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 		double totalAllocation = totalGuaranteedBandwidth;
 		// FIXME: MAKE CONFIGURABLE AND SECLEVEL DEPENDANT!
 		double localAllocation = totalAllocation * 0.5;
-		if(source == null)
+		if (source == null)
 		    thisAllocation = localAllocation;
 		else {
 		    totalAllocation -= localAllocation;
@@ -2945,60 +2975,27 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 	}
 
 	public void reportIncomingRequestLocation(double loc) {
-		assert((loc > 0) && (loc < 1.0));
-
-		synchronized(incomingRequestsByLoc) {
-			incomingRequestsByLoc[(int)Math.floor(loc*incomingRequestsByLoc.length)]++;
-			incomingRequestsAccounted++;
-		}
+		incomingRequests.report(loc);
 	}
 
 	public int[] getIncomingRequestLocation(int[] retval) {
-		int[] result = new int[incomingRequestsByLoc.length];
-		synchronized(incomingRequestsByLoc) {
-			System.arraycopy(incomingRequestsByLoc, 0, result, 0, incomingRequestsByLoc.length);
-			retval[0] = incomingRequestsAccounted;
-		}
-
-		return result;
+		return incomingRequests.getCounts(retval);
 	}
 
 	public void reportOutgoingLocalRequestLocation(double loc) {
-		assert((loc > 0) && (loc < 1.0));
-
-		synchronized(outgoingLocalRequestByLoc) {
-			outgoingLocalRequestByLoc[(int)Math.floor(loc*outgoingLocalRequestByLoc.length)]++;
-			outgoingLocalRequestsAccounted++;
-		}
+		outgoingLocalRequests.report(loc);
 	}
 
 	public int[] getOutgoingLocalRequestLocation(int[] retval) {
-		int[] result = new int[outgoingLocalRequestByLoc.length];
-		synchronized(outgoingLocalRequestByLoc) {
-			System.arraycopy(outgoingLocalRequestByLoc, 0, result, 0, outgoingLocalRequestByLoc.length);
-			retval[0] = outgoingLocalRequestsAccounted;
-		}
-
-		return result;
+		return outgoingLocalRequests.getCounts(retval);
 	}
 
 	public void reportOutgoingRequestLocation(double loc) {
-		assert((loc > 0) && (loc < 1.0));
-
-		synchronized(outgoingRequestByLoc) {
-			outgoingRequestByLoc[(int)Math.floor(loc*outgoingRequestByLoc.length)]++;
-			outgoingRequestsAccounted++;
-		}
+		outgoingRequests.report(loc);
 	}
 
 	public int[] getOutgoingRequestLocation(int[] retval) {
-		int[] result = new int[outgoingRequestByLoc.length];
-		synchronized(outgoingRequestByLoc) {
-			System.arraycopy(outgoingRequestByLoc, 0, result, 0, outgoingRequestByLoc.length);
-			retval[0] = outgoingRequestsAccounted;
-		}
-
-		return result;
+		return outgoingRequests.getCounts(retval);
 	}
 
 	public void reportCHKOutcome(long rtt, boolean successful, double location, boolean isRealtime) {
@@ -3632,8 +3629,13 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 	
 	/** To prevent thread overflow */
 	private final static int MAX_ANNOUNCEMENTS = 100;
-	
-	public boolean shouldAcceptAnnouncement(long uid) {
+
+	enum AnnouncementDecision {
+		ACCEPT,
+		OVERLOAD,
+		LOOP
+	}
+	public AnnouncementDecision shouldAcceptAnnouncement(long uid) {
 		int outputPerSecond = node.getOutputBandwidthLimit() / 2; // FIXME: Take overhead into account??? Be careful, it may include announcements and that would cause problems!
 		int inputPerSecond = node.getInputBandwidthLimit() / 2;
 		int limit = Math.min(inputPerSecond, outputPerSecond);
@@ -3642,7 +3644,7 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 			int running = runningAnnouncements.size();
 			if(running >= MAX_ANNOUNCEMENTS) {
 				if(logMINOR) Logger.minor(this, "Too many announcements running: "+running);
-				return false;
+				return AnnouncementDecision.OVERLOAD;
 			}
 			// Liability-style limiting as well.
 			int perTransfer = OpennetManager.PADDED_NODEREF_SIZE;
@@ -3650,11 +3652,14 @@ public class NodeStats implements Persistable, BlockTimeCallback {
 			int bandwidthIn30Secs = limit * 30;
 			if(perTransfer * transfersPerAnnouncement * running > bandwidthIn30Secs) {
 				if(logMINOR) Logger.minor(this, "Can't complete "+running+" announcements in 30 secs");
-				return false;
+				return AnnouncementDecision.OVERLOAD;
 			}
-			runningAnnouncements.add(uid);
-			if(logMINOR) Logger.minor(this, "Accepting announcement "+uid);
-			return true;
+			boolean ret = runningAnnouncements.add(uid);
+			if(logMINOR) {
+				if(ret) Logger.minor(this, "Accepting announcement "+uid);
+				else Logger.minor(this, "Rejecting (loop) announcement "+uid);
+			}
+			return (ret ? AnnouncementDecision.ACCEPT : AnnouncementDecision.LOOP);
 		}
 	}
 	

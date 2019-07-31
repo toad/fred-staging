@@ -3,7 +3,23 @@ package freenet.node;
 import freenet.io.comm.AsyncMessageCallback;
 import freenet.support.Logger;
 
-/** Waits for multiple asynchronous message sends, then calls finish(). */
+/** Groups a set of message sends together so that we get a single sent(boolean)
+ * callback after all the messages have been sent, and then later a finished(boolean).
+ * None of the callbacks will be called until after you call arm(). Typical usage:
+ * <pre>Message m1 = ...;
+ * Message m2 = ...;
+ * PeerNode pn = ...;
+ * MultiMessageCallback mcb = new MultiMessageCallback() {
+ *   protected void finish(boolean success) {
+ *     // Messages have finished.
+ *   }
+ *   protected void sent(boolean success) {
+ *     // Messages have been sent.
+ *   }
+ * }
+ * pn.sendAsync(m1, mcb.make(), ctr);
+ * pn.sendAsync(m2, mcb.make(), ctr);
+ * mcb.arm();</pre> */
 public abstract class MultiMessageCallback {
     
     private static volatile boolean logMINOR;
@@ -11,11 +27,16 @@ public abstract class MultiMessageCallback {
         Logger.registerClass(MultiMessageCallback.class);
     }
 	
+    /** Number of messages that have not yet completed */
 	private int waiting;
+	/** Number of messages that have not yet been sent */
 	private int waitingForSend;
 	
+	/** True if arm() has been called. finish(boolean) and sent(boolean) will 
+	 * only be called after arming the callback. */
 	private boolean armed;
 	
+	/** True if some messages have failed to send (e.g. disconnected). */
 	private boolean someFailed;
 	
 	/** This is called when all messages have been acked, or failed */
@@ -24,8 +45,10 @@ public abstract class MultiMessageCallback {
 	/** This is called when all messages have been sent (but not acked) or failed to send */
 	abstract void sent(boolean success);
 
+	/** Add another message. You should call arm() after you have added all messages. */
 	public AsyncMessageCallback make() {
 		synchronized(this) {
+		    assert(!armed);
 			AsyncMessageCallback cb = new AsyncMessageCallback() {
 
 				private boolean finished;
@@ -97,6 +120,9 @@ public abstract class MultiMessageCallback {
 		}
 	}
 
+	/** Enable the callback. The callbacks sent(boolean) and finish(boolean)
+	 * will only be called after this method has been called, so you should 
+	 * use this to indicate that you won't add any more messages. */
 	public void arm() {
 		boolean success;
 		boolean callSent = false;
@@ -115,6 +141,7 @@ public abstract class MultiMessageCallback {
 		if(complete) finish(success);
 	}
 	
+	/** @return True if the callbacck has finished (and is armed) */
 	protected final synchronized boolean finished() {
 		return armed && waiting == 0;
 	}
