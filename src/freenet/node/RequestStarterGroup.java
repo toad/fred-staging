@@ -3,8 +3,6 @@
  * http://www.gnu.org/ for further details of the GPL. */
 package freenet.node;
 
-import static java.util.concurrent.TimeUnit.MINUTES;
-
 import freenet.client.async.ClientContext;
 import freenet.client.async.ClientRequestScheduler;
 import freenet.config.Config;
@@ -17,12 +15,14 @@ import freenet.keys.Key;
 import freenet.l10n.NodeL10n;
 import freenet.support.LogThresholdCallback;
 import freenet.support.Logger;
+import freenet.support.Logger.LogLevel;
 import freenet.support.SimpleFieldSet;
 import freenet.support.TimeUtil;
-import freenet.support.Logger.LogLevel;
 import freenet.support.api.BooleanCallback;
 import freenet.support.api.StringCallback;
 import freenet.support.math.BootstrappingDecayingRunningAverage;
+
+import static java.util.concurrent.TimeUnit.MINUTES;
 
 public class RequestStarterGroup {
 	private static volatile boolean logMINOR;
@@ -73,7 +73,7 @@ public class RequestStarterGroup {
 	private boolean lazyStart;
 
 	private final NodeStats stats;
-	RequestStarterGroup(Node node, NodeClientCore core, int portNumber, RandomSource random, Config config, SimpleFieldSet fs, ClientContext ctx, long dbHandle) throws InvalidConfigValueException {
+	RequestStarterGroup(Node node, NodeClientCore core, int portNumber, RandomSource random, Config config, SimpleFieldSet fs, ClientContext ctx) throws InvalidConfigValueException {
 		SubConfig schedulerConfig = config.createSubConfig("node.scheduler");
 		this.stats = core.nodeStats;
 		

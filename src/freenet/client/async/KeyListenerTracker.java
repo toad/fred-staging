@@ -7,7 +7,7 @@ import static java.lang.String.format;
 
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.List;
 
 import freenet.crypt.RandomSource;
 import freenet.crypt.SHA256;
@@ -61,7 +61,7 @@ class KeyListenerTracker implements KeySalter {
 	
 	protected final ClientRequestScheduler sched;
 	/** Transient even for persistent scheduler. There is one for each of transient, persistent. */
-	protected final ArrayList<KeyListener> keyListeners;
+	private final ArrayList<KeyListener> keyListeners;
 
 	final boolean persistent;
 	
@@ -111,48 +111,57 @@ class KeyListenerTracker implements KeySalter {
 		boolean ret;
 		synchronized (this) {
 			ret = keyListeners.remove(listener);
-			while(logMINOR && keyListeners.remove(listener))
-				Logger.error(this, "Still in pending keys after removal, must be in twice or more: "+listener, new Exception("error"));
-			listener.onRemove();
 		}
+		listener.onRemove();
 		if (logMINOR)
 			Logger.minor(this, "Removed pending keys from "+this+" : size now "+keyListeners.size()+" : "+listener, new Exception("debug"));
 		return ret;
 	}
 	
-	public synchronized boolean removePendingKeys(HasKeyListener hasListener) {
-		boolean found = false;
-		for(Iterator<KeyListener> i = keyListeners.iterator();i.hasNext();) {
-			KeyListener listener = i.next();
-			if(listener == null) {
-				i.remove();
-				Logger.error(this, "Null KeyListener in removePendingKeys()");
-				continue;
-			}
-			if(listener.getHasKeyListener() == hasListener) {
-				found = true;
-				i.remove();
-				listener.onRemove();
-				Logger.normal(this, "Removed pending keys from "+this+" : size now "+keyListeners.size()+" : "+listener);
+	public boolean removePendingKeys(HasKeyListener hasListener) {
+		ArrayList<KeyListener> matches = new ArrayList<KeyListener>();
+		synchronized (this) {
+			for (KeyListener listener : keyListeners) {
+				HasKeyListener hkl;
+				try {
+					hkl = listener.getHasKeyListener();
+				} catch (Throwable t) {
+					Logger.error(this, format("Error in getHasKeyListener callback for %s", listener), t);
+					continue;
+				}
+				if (hkl == hasListener) {
+					matches.add(listener);
+				}
 			}
 		}
-		return found;
+		if (matches.isEmpty()) {
+			return false;
+		}
+		for (KeyListener listener : matches) {
+			try {
+				removePendingKeys(listener);
+			} catch (Throwable t) {
+				Logger.error(this, format("Error while removing %s", listener), t);
+			}
+		}
+		return true;
 	}
 	
 	public short getKeyPrio(Key key, short priority, ClientContext context) {
 		assert(key instanceof NodeSSK == isSSKScheduler);
 		byte[] saltedKey = saltKey(key);
-		ArrayList<KeyListener> matches = null;
-		synchronized(this) {
-			for(KeyListener listener : keyListeners) {
-				if(!listener.probablyWantKey(key, saltedKey)) continue;
-				if(matches == null) matches = new ArrayList<KeyListener> ();
-				matches.add(listener);
-			}
+		List<KeyListener> matches = probablyWantKey(key, saltedKey);
+		if (matches.isEmpty()) {
+			return priority;
 		}
-		if(matches == null) return priority;
-		for(KeyListener listener : matches) {
-			short prio = listener.definitelyWantKey(key, saltedKey, sched.clientContext);
+		for (KeyListener listener : matches) {
+			short prio;
+			try {
+				prio = listener.definitelyWantKey(key, saltedKey, sched.clientContext);
+			} catch (Throwable t) {
+				Logger.error(this, format("Error in definitelyWantKey callback for %s", listener), t);
+				continue;
+			}
 			if(prio == -1) continue;
 			if(prio < priority) priority = prio;
 		}
@@ -161,26 +170,29 @@ class KeyListenerTracker implements KeySalter {
 	
 	public synchronized long countWaitingKeys() {
 		long count = 0;
-		for(KeyListener listener : keyListeners)
-			count += listener.countKeys();
+		for (KeyListener listener : keyListeners) {
+			try {
+				count += listener.countKeys();
+			} catch (Throwable t) {
+				Logger.error(this, format("Error in countKeys callback for %s", listener), t);
+			}
+		}
 		return count;
 	}
 	
 	public boolean anyWantKey(Key key, ClientContext context) {
 		assert(key instanceof NodeSSK == isSSKScheduler);
 		byte[] saltedKey = saltKey(key);
-		ArrayList<KeyListener> matches = null;
-		synchronized(this) {
-			for(KeyListener listener : keyListeners) {
-				if(!listener.probablyWantKey(key, saltedKey)) continue;
-				if(matches == null) matches = new ArrayList<KeyListener> ();
-				matches.add(listener);
-			}
-		}
-		if(matches != null) {
-			for(KeyListener listener : matches) {
-				if(listener.definitelyWantKey(key, saltedKey, sched.clientContext) >= 0)
-					return true;
+		List<KeyListener> matches = probablyWantKey(key, saltedKey);
+		if (!matches.isEmpty()) {
+			for (KeyListener listener : matches) {
+				try {
+					if (listener.definitelyWantKey(key, saltedKey, sched.clientContext) >= 0) {
+						return true;
+					}
+				} catch (Throwable t) {
+					Logger.error(this, format("Error in definitelyWantKey callback for %s", listener), t);
+				}
 			}
 		}
 		return false;
@@ -189,9 +201,14 @@ class KeyListenerTracker implements KeySalter {
 	public synchronized boolean anyProbablyWantKey(Key key, ClientContext context) {
 		assert(key instanceof NodeSSK == isSSKScheduler);
 		byte[] saltedKey = saltKey(key);
-		for(KeyListener listener : keyListeners) {
-			if(listener.probablyWantKey(key, saltedKey))
-				return true;
+		for (KeyListener listener : keyListeners) {
+			try {
+				if (listener.probablyWantKey(key, saltedKey)) {
+					return true;
+				}
+			} catch (Throwable t) {
+				Logger.error(this, format("Error in probablyWantKey callback for %s", listener), t);
+			}
 		}
 		return false;
 	}
@@ -203,53 +220,51 @@ class KeyListenerTracker implements KeySalter {
 		}
 		assert(key instanceof NodeSSK == isSSKScheduler);
 		byte[] saltedKey = saltKey(key);
-		ArrayList<KeyListener> matches = null;
-		synchronized(this) {
-			for(KeyListener listener : keyListeners) {
-				if(!listener.probablyWantKey(key, saltedKey)) continue;
-				if(matches == null) matches = new ArrayList<KeyListener> ();
-				if(matches.contains(listener)) {
-					Logger.error(this, "In matches twice, presumably in keyListeners twice?: "+listener);
-					continue;
+		List<KeyListener> matches = probablyWantKey(key, saltedKey);
+		boolean ret = false;
+		for (KeyListener listener : matches) {
+			try {
+				if (listener.handleBlock(key, saltedKey, block, context)) {
+					ret = true;
 				}
-				matches.add(listener);
+			} catch (Throwable t) {
+				Logger.error(this, format("Error in handleBlock callback for %s", listener), t);
+			}
+			if (listener.isEmpty()) {
+				try {
+					removePendingKeys(listener);
+				} catch (Throwable t) {
+					Logger.error(this, format("Error while removing %s", listener), t);
+				}
 			}
 		}
-		boolean ret = false;
-		if(matches != null) {
-			for(KeyListener listener : matches) {
-				try {
-					if(listener.handleBlock(key, saltedKey, block, context))
-						ret = true;
-				} catch (Throwable t) {
-					Logger.error(this, format("Error in handleBlock callback for %s", listener), t);
-				}
-				if(listener.isEmpty()) {
-					synchronized(this) {
-						keyListeners.remove(listener);
-					}
-					listener.onRemove();
-				}
-			}
-		} else return false;
 		return ret;
 	}
 	
 	public SendableGet[] requestsForKey(Key key, ClientContext context) {
-		ArrayList<SendableGet> list = null;
+		ArrayList<SendableGet> list = new ArrayList<SendableGet>();
 		assert(key instanceof NodeSSK == isSSKScheduler);
 		byte[] saltedKey = saltKey(key);
-		synchronized(this) {
-		for(KeyListener listener : keyListeners) {
-			if(!listener.probablyWantKey(key, saltedKey)) continue;
-			SendableGet[] reqs = listener.getRequestsForKey(key, saltedKey, context);
-			if(reqs == null) continue;
-			if(list == null) list = new ArrayList<SendableGet>();
-			for(SendableGet req: reqs) list.add(req);
+		List<KeyListener> matches = probablyWantKey(key, saltedKey);
+		for (KeyListener listener : matches) {
+			SendableGet[] reqs;
+			try {
+				reqs = listener.getRequestsForKey(key, saltedKey, context);
+			} catch (Throwable t) {
+				Logger.error(this, format("Error in getRequestsForKey callback for %s", listener), t);
+				continue;
+			}
+			if (reqs == null) {
+				continue;
+			}
+			for (SendableGet req : reqs) {
+				list.add(req);
+			}
 		}
+		if (list.isEmpty()) {
+			return null;
 		}
-		if(list == null) return null;
-		else return list.toArray(new SendableGet[list.size()]);
+		return list.toArray(new SendableGet[list.size()]);
 	}
 	
 	@Override
@@ -282,4 +297,24 @@ class KeyListenerTracker implements KeySalter {
 			globalSalt = globalSalt2;
 	}
 
+	/**
+	 * Returns all KeyListeners that return true on probablyWantKey(key, saltedKey)
+	 */
+	private List<KeyListener> probablyWantKey(Key key, byte[] saltedKey) {
+		ArrayList<KeyListener> matches = new ArrayList<KeyListener>();
+		synchronized (this) {
+			for (KeyListener listener : keyListeners) {
+				try {
+					if (!listener.probablyWantKey(key, saltedKey)) {
+						continue;
+					}
+				} catch (Throwable t) {
+					Logger.error(this, format("Error in probablyWantKey callback for %s", listener), t);
+					continue;
+				}
+				matches.add(listener);
+			}
+		}
+		return matches;
+	}
 }

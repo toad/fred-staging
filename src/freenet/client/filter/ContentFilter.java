@@ -52,37 +52,62 @@ public class ContentFilter {
 		
 		// Plain text
 		register(new FilterMIMEType("text/plain", "txt", new String[0], new String[] { "text", "pot" },
-				true, true, null, null, false, false, false, false, false, false,
+				true, true, null, false, false, false, false, false, false,
 				l10n("textPlainReadAdvice"),
-				l10n("textPlainWriteAdvice"),
 				true, "US-ASCII", null, false));
 		
 		// GIF - has a filter 
 		register(new FilterMIMEType("image/gif", "gif", new String[0], new String[0], 
-				true, false, new GIFFilter(), null, false, false, false, false, false, false,
+				true, false, new GIFFilter(), false, false, false, false, false, false,
 				l10n("imageGifReadAdvice"),
-				l10n("imageGifWriteAdvice"),
 				false, null, null, false));
 		
 		// JPEG - has a filter
 		register(new FilterMIMEType("image/jpeg", "jpeg", new String[0], new String[] { "jpg" },
-				true, false, new JPEGFilter(true, true), null, false, false, false, false, false, false,
+				true, false, new JPEGFilter(true, true), false, false, false, false, false, false,
 				l10n("imageJpegReadAdvice"),
-				l10n("imageJpegWriteAdvice"), false, null, null, false));
+				false, null, null, false));
 		
 		// PNG - has a filter
 		register(new FilterMIMEType("image/png", "png", new String[] { "image/x-png" }, new String[0],
-				true, false, new PNGFilter(true, true, true), null, false, false, false, false, true, false,
+				true, false, new PNGFilter(true, true, true), false, false, false, false, true, false,
 				l10n("imagePngReadAdvice"),
-				l10n("imagePngWriteAdvice"), false, null, null, false));
+				false, null, null, false));
 
 
 		// BMP - has a filter
 		// Reference: http://filext.com/file-extension/BMP
 		register(new FilterMIMEType("image/bmp", "bmp", new String[] { "image/x-bmp","image/x-bitmap","image/x-xbitmap","image/x-win-bitmap","image/x-windows-bmp","image/ms-bmp","image/x-ms-bmp","application/bmp","application/x-bmp","application/x-win-bitmap"  }, new String[0],
-				true, false, new BMPFilter(), null, false, false, false, false, true, false,
+				true, false, new BMPFilter(), false, false, false, false, true, false,
 				l10n("imageBMPReadAdvice"),
-				l10n("imageBMPWriteAdvice"), false, null, null, false));	
+				false, null, null, false));	
+
+		/* Ogg - has a filter
+		 * Xiph's container format. Contains one or more logical bitstreams.
+		 * Each type of bitstream will likely require additional processing,
+		 * on top of that needed for the Ogg container itself.
+		 * Reference: http://xiph.org/ogg/doc/rfc3533.txt
+		 */
+		register(new FilterMIMEType("application/ogg", "ogx", new String[] {"video/ogg", "audio/ogg"}, new String[]{"ogg", "oga", "ogv"},
+				true, false, new OggFilter(), true, true, false, true, false, false,
+				l10n("containerOggReadAdvice"),false, null, null, false));
+
+		/* FLAC - Needs filter
+		 * Lossless audio format. This data is sometimes encapsulated inside
+		 * of ogg containers. It is, however, not currently supported, and
+		 * is very dangerous, as it may specify URLs from which album art
+		 * will be dwonloaded from
+		 */
+		register(new FilterMIMEType("audio/flac", "flac", new String[] {"application/x-flac"}, new String[0],
+				true, true, new FlacFilter(),  true, true, false, true, false, false,
+				l10n("audioFLACReadAdvice"),
+				false, null, null, false));
+
+		// M3U - strict filter
+		register(new FilterMIMEType("audio/mpegurl", "m3u", new String[] {"application/vnd.apple.mpegurl","application/mpegurl","application/x-mpegurl","audio/x-mpegurl"}, new String[] {"m3u8"},
+				false, false, new M3UFilter(), false, false, false, false, false, false,
+				l10n("audioM3UReadAdvice"),
+				false, "utf-8", null, false));
 
 
 		/* MP3
@@ -90,8 +115,8 @@ public class ContentFilter {
 		 * Reference: http://www.mp3-tech.org/programmer/frame_header.html
 		 */
 		register(new FilterMIMEType("audio/mpeg", "mp3", new String[] {"audio/mp3", "audio/x-mp3", "audio/x-mpeg", "audio/mpeg3", "audio/x-mpeg3", "audio/mpg", "audio/x-mpg", "audio/mpegaudio"},
-				new String[0], true, false, new MP3Filter(), new MP3Filter(), true, true, false, true, false, false,
-				l10n("audioMP3ReadAdvice"), l10n("audioMP3WriteAdvice"), false, null, null, false));
+				new String[0], true, false, new MP3Filter(), true, true, false, true, false, false,
+				l10n("audioMP3ReadAdvice"), false, null, null, false));
 
 		// ICO needs filtering.
 		// Format is not the same as BMP iirc.
@@ -102,29 +127,26 @@ public class ContentFilter {
 //		register(new FilterMIMEType("image/x-icon", "ico", new String[] { "image/vnd.microsoft.icon", "image/ico", "application/ico"}, 
 //				new String[0], true, false, null, null, false, false, false, false, false, false,
 //				l10n("imageIcoReadAdvice"),
-//				l10n("imageIcoWriteAdvice"), false, null, null, false));
+//				false, null, null, false));
 		
 		// PDF - very dangerous - FIXME ideally we would have a filter, this is such a common format...
 		register(new FilterMIMEType("application/pdf", "pdf", new String[] { "application/x-pdf" }, new String[0],
-				false, false, null, null, true, true, true, false, true, true,
+				false, false, null, true, true, true, false, true, true,
 				l10n("applicationPdfReadAdvice"),
-				l10n("applicationPdfWriteAdvice"),
 				false, null, null, false));
 		
 		// HTML - dangerous if not filtered
 		register(new FilterMIMEType(HTML_MIME_TYPES[0], "html", Arrays.asList(HTML_MIME_TYPES).subList(1, HTML_MIME_TYPES.length).toArray(new String[HTML_MIME_TYPES.length-1]), new String[] { "htm" },
-				false, false /* maybe? */, new HTMLFilter(), null /* FIXME */, 
+				false, false /* maybe? */, new HTMLFilter(),
 				true, true, true, true, true, true, 
 				l10n("textHtmlReadAdvice"),
-				l10n("textHtmlWriteAdvice"),
 				true, "iso-8859-1", new HTMLFilter(), false));
 		
 		// CSS - danagerous if not filtered, not sure about the filter
 		register(new FilterMIMEType("text/css", "css", new String[0], new String[0],
-				false, false /* unknown */, new CSSReadFilter(), null,
+				false, false /* unknown */, new CSSReadFilter(),
 				true, true, true, true, true, false,
 				l10n("textCssReadAdvice"),
-				l10n("textCssWriteAdvice"),
 				true, "utf-8", new CSSReadFilter(), true));
 		
 	}
@@ -275,7 +297,7 @@ public class ContentFilter {
 					byte[] charsetBuffer = new byte[bufferSize];
 					int bytesRead = 0, offset = 0, toread=0;
 					while(true) {
-                                                toread = bufferSize - offset;
+						toread = bufferSize - offset;
 						bytesRead = input.read(charsetBuffer, offset, toread);
 						if(bytesRead == -1 || toread == 0) break;
 						offset += bytesRead;
@@ -287,6 +309,7 @@ public class ContentFilter {
 					handler.readFilter.readFilter(input, output, charset, otherParams, filterCallback);
 				}
 				catch(EOFException e) {
+					Logger.error(ContentFilter.class, "EOFException caught: "+e,e);
 					throw new DataFilterException(l10n("EOFMessage"), l10n("EOFMessage"), l10n("EOFDescription"));
 				}
 				catch(IOException e) {

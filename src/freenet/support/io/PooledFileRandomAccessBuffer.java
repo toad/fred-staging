@@ -12,11 +12,11 @@ import java.util.Random;
 
 import freenet.client.async.ClientContext;
 import freenet.support.Logger;
+import freenet.support.WrapperKeepalive;
 import freenet.support.api.LockableRandomAccessBuffer;
-import freenet.support.math.MersenneTwister;
 
 /** Random access files with a limited number of open files, using a pool. 
- * LOCKING OPTIMISATION: Contention on closables likely here. It's not clear how to avoid that, FIXME.
+ * LOCKING OPTIMISATION: Contention on DEFAULT_FDTRACKER likely here. It's not clear how to avoid that, FIXME.
  * However, this is doing disk I/O (even if cached, system calls), so maybe it's not a big deal ... 
  * 
  * FIXME does this need a shutdown hook? I don't see why it would matter ... ??? */
@@ -28,18 +28,40 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
     }
     
     private static final long serialVersionUID = 1L;
-    private static int MAX_OPEN_FDS = 100;
-    /** Total number of currently open FDs */
-    static int totalOpenFDs = 0;
-    static final LinkedHashSet<PooledFileRandomAccessBuffer> closables = new LinkedHashSet<PooledFileRandomAccessBuffer>();
+
+    static class FDTracker implements Serializable {
+        private int maxOpenFDs;
+        private int totalOpenFDs = 0;
+        private final LinkedHashSet<PooledFileRandomAccessBuffer> closables = new LinkedHashSet<PooledFileRandomAccessBuffer>();
+        FDTracker(int maxOpenFDs) {
+            this.maxOpenFDs = maxOpenFDs;
+        }
+
+        /** Set the size of the fd pool */
+        synchronized void setMaxFDs(int max) {
+            if(max <= 0) throw new IllegalArgumentException();
+            maxOpenFDs = max;
+        }
+
+        /** How many fd's are open right now? Mainly for tests but also for stats. */
+        synchronized int getOpenFDs() {
+            return totalOpenFDs;
+        }
+
+        synchronized int getClosableFDs() {
+            return closables.size();
+        }
+    }
+    private static final FDTracker DEFAULT_FDTRACKER = new FDTracker(100);
+    private final FDTracker fds;
     
     public final File file;
     private final boolean readOnly;
     /** >0 means locked. We will wait until we get the lock if necessary, this is always accurate. 
-     * LOCKING: Synchronized on closables (i.e. static, but not the class). */
+     * LOCKING: Synchronized on fds. */
     private int lockLevel;
     /** The actual RAF. Non-null only if open. LOCKING: Synchronized on (this).
-     * LOCKING: Always take (this) last, i.e. after closables. */
+     * LOCKING: Always take (this) last, i.e. after fds. */
     private transient RandomAccessFile raf;
     private final long length;
     private boolean closed;
@@ -48,7 +70,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
     private final long persistentTempID;
     private boolean secureDelete;
     private final boolean deleteOnFree;
-    
+
     /** Create a RAF backed by a file.
      * @param file 
      * @param readOnly
@@ -58,10 +80,16 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
      * @throws IOException
      */
     public PooledFileRandomAccessBuffer(File file, boolean readOnly, long forceLength, Random seedRandom, long persistentTempID, boolean deleteOnFree) throws IOException {
+        this(file, readOnly, forceLength, seedRandom, persistentTempID, deleteOnFree, DEFAULT_FDTRACKER);
+    }
+
+    // For unit testing
+    PooledFileRandomAccessBuffer(File file, boolean readOnly, long forceLength, Random seedRandom, long persistentTempID, boolean deleteOnFree, FDTracker fds) throws IOException {
         this.file = file;
         this.readOnly = readOnly;
         this.persistentTempID = persistentTempID;
         this.deleteOnFree = deleteOnFree;
+        this.fds = fds;
         lockLevel = 0;
         // Check the parameters and get the length.
         // Also, unlock() adds to the closeables queue, which is essential.
@@ -71,19 +99,10 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
             if(forceLength >= 0 && forceLength != currentLength) {
                 if(readOnly) throw new IOException("Read only but wrong length");
                 // Preallocate space. We want predictable disk usage, not minimal disk usage, especially for downloads.
-                raf.seek(0);
-                MersenneTwister mt = null;
-                if(seedRandom != null)
-                    mt = new MersenneTwister(seedRandom.nextLong());
-                byte[] buf = new byte[4096];
-                for(long l = 0; l < forceLength; l+=4096) {
-                    if(mt != null)
-                        mt.nextBytes(buf);
-                    int maxWrite = (int)Math.min(4096, forceLength - l);
-                    raf.write(buf, 0, maxWrite);
+                try (WrapperKeepalive wrapperKeepalive = new WrapperKeepalive()) {
+                    wrapperKeepalive.start();
+                    Fallocate.forChannel(raf.getChannel(), forceLength).fromOffset(currentLength).execute();
                 }
-                assert(raf.getFilePointer() == forceLength);
-                assert(raf.length() == forceLength);
                 raf.setLength(forceLength); 
                 currentLength = forceLength;
             }
@@ -105,6 +124,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
         this.length = size;
         this.persistentTempID = persistentTempID;
         this.deleteOnFree = deleteOnFree;
+        this.fds = DEFAULT_FDTRACKER;
         lockLevel = 0;
         RAFLock lock = lockOpen(true);
         try {
@@ -126,6 +146,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
         length = 0;
         persistentTempID = -1;
         deleteOnFree = false;
+        fds = null;
     }
 
     @Override
@@ -169,13 +190,13 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
     @Override
     public void close() {
         if(logMINOR) Logger.minor(this, "Closing "+this, new Exception("debug"));
-        synchronized(closables) {
+        synchronized(fds) {
             if(lockLevel != 0)
                 throw new IllegalStateException("Must unlock first!");
             closed = true;
             // Essential to avoid memory leak!
             // Potentially slow but only happens on close(). Plus the size of closables is bounded anyway by the fd limit.
-            closables.remove(this);
+            fds.closables.remove(this);
             closeRAF();
         }
     }
@@ -194,17 +215,17 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
             }
             
         };
-        synchronized(closables) {
+        synchronized(fds) {
             while(true) {
-                closables.remove(this);
+                fds.closables.remove(this);
                 if(closed) throw new IOException("Already closed "+this);
                 if(raf != null) {
                     lockLevel++; // Already open, may or may not be already locked.
                     return lock;
-                } else if(totalOpenFDs < MAX_OPEN_FDS) {
+                } else if(fds.totalOpenFDs < fds.maxOpenFDs) {
                     raf = new RandomAccessFile(file, (readOnly && !forceWrite) ? "r" : "rw");
                     lockLevel++;
-                    totalOpenFDs++;
+                    fds.totalOpenFDs++;
                     return lock;
                 } else {
                     PooledFileRandomAccessBuffer closable = pollFirstClosable();
@@ -213,7 +234,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
                         continue;
                     }
                     try {
-                        closables.wait();
+                        fds.wait();
                     } catch (InterruptedException e) {
                         // Ignore
                     }
@@ -223,8 +244,8 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
     }
     
     private PooledFileRandomAccessBuffer pollFirstClosable() {
-        synchronized(closables) {
-            Iterator<PooledFileRandomAccessBuffer> it = closables.iterator();
+        synchronized(fds) {
+            Iterator<PooledFileRandomAccessBuffer> it = fds.closables.iterator();
             if (it.hasNext()) {
                 PooledFileRandomAccessBuffer first = it.next();
                 it.remove();
@@ -236,7 +257,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
 
     /** Exposed for tests only. Used internally. Must be unlocked. */
     protected void closeRAF() {
-        synchronized(closables) {
+        synchronized(fds) {
             if(lockLevel != 0) throw new IllegalStateException();
             if(raf == null) return;
             try {
@@ -245,16 +266,16 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
                 Logger.error(this, "Error closing "+this+" : "+e, e);
             }
             raf = null;
-            totalOpenFDs--;
+            fds.totalOpenFDs--;
         }
     }
 
     private void unlock() {
-        synchronized(closables) {
+        synchronized(fds) {
             lockLevel--;
             if(lockLevel > 0) return;
-            closables.add(this);
-            closables.notify();
+            fds.closables.add(this);
+            fds.notify();
         }
     }
     
@@ -278,33 +299,14 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
         }
     }
     
-    /** Set the size of the fd pool */
-    public static void setMaxFDs(int max) {
-        synchronized(closables) {
-            if(max <= 0) throw new IllegalArgumentException();
-            MAX_OPEN_FDS = max;
-        }
-    }
-
-    /** How many fd's are open right now? Mainly for tests but also for stats. */
-    public static int getOpenFDs() {
-        return totalOpenFDs;
-    }
-    
-    static int getClosableFDs() {
-        synchronized(closables) {
-            return closables.size();
-        }
-    }
-    
     boolean isOpen() {
-        synchronized(closables) {
+        synchronized(fds) {
             return raf != null;
         }
     }
     
     boolean isLocked() {
-        synchronized(closables) {
+        synchronized(fds) {
             return lockLevel != 0;
         }
     }
@@ -354,6 +356,7 @@ public class PooledFileRandomAccessBuffer implements LockableRandomAccessBuffer,
             secureDelete = dis.readBoolean();
         else
             secureDelete = false;
+        fds = DEFAULT_FDTRACKER;
         if(length < 0) throw new StorageFormatException("Bad length");
         if(persistentTempID != -1) {
             // File must exist!

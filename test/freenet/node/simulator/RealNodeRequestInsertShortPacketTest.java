@@ -2,6 +2,7 @@ package freenet.node.simulator;
 
 import java.io.IOException;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
 import freenet.io.comm.PeerParseException;
@@ -20,7 +21,7 @@ import freenet.support.compress.InvalidCompressionCodecException;
 
 public class RealNodeRequestInsertShortPacketTest extends RealNodeRequestInsertShortTestBase {
 
-    @Test
+    @Test @Ignore
     public void testSmallNetwork() throws CHKEncodeException, SSKEncodeException, FSParseException, PeerParseException, InvalidThresholdException, NodeInitException, ReferenceSignatureVerificationException, InterruptedException, SimulatorOverloadedException, InvalidCompressionCodecException, IOException, KeyDecodeException, ExitException {
         //if(!TestProperty.EXTENSIVE) return;
         // Bandwidth limit is arbitrary but must be set small enough to simulate delays between 

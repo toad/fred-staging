@@ -973,6 +973,15 @@ public class PeerManager {
 			totalSelectionRate += selectionRates[i];
 		}
 		boolean enableFOAFMitigationHack = (peers.length >= PeerNode.SELECTION_MIN_PEERS) && (totalSelectionRate > 0.0);
+
+		// Locations not to consider for routing: our own location, and locations already routed to
+		Set<Double> excludeLocations = new HashSet<Double>();
+		excludeLocations.add(myLoc);
+		excludeLocations.add(prevLoc);
+		for (PeerNode routedToNode : routedTo) {
+			excludeLocations.add(routedToNode.getLocation());
+		}
+
 		for(int i = 0; i < peers.length; i++) {
 			PeerNode p = peers[i];
 			if(routedTo.contains(p)) {
@@ -1038,21 +1047,9 @@ public class PeerManager {
 			double realDiff = Location.distance(loc, target);
 			double diff = realDiff;
 			
-			double[] peersLocation = p.getPeersLocation();
-			if((peersLocation != null) && (p.shallWeRouteAccordingToOurPeersLocation())) {
-				for(double l : peersLocation) {
-					boolean ignoreLoc = false; // Because we've already been there
-					if(Math.abs(l - myLoc) < Double.MIN_VALUE * 2 ||
-							Math.abs(l - prevLoc) < Double.MIN_VALUE * 2)
-						ignoreLoc = true;
-					else {
-						for(PeerNode cmpPN : routedTo)
-							if(Math.abs(l - cmpPN.getLocation()) < Double.MIN_VALUE * 2) {
-								ignoreLoc = true;
-								break;
-							}
-					}
-					if(ignoreLoc) continue;
+			if (p.shallWeRouteAccordingToOurPeersLocation(outgoingHTL)) {
+				double l = p.getClosestPeerLocation(target, excludeLocations);
+				if (!Double.isNaN(l)) {
 					double newDiff = Location.distance(l, target);
 					if(newDiff < diff) {
 						loc = l;
@@ -1166,7 +1163,8 @@ public class PeerManager {
 		
 		if(recentlyFailed != null && logMINOR)
 			Logger.minor(this, "Count waiting: "+countWaiting);
-		if(recentlyFailed != null && countWaiting >= 3 && 
+		int maxCountWaiting = maxCountWaiting(peers);
+		if(recentlyFailed != null && countWaiting >= maxCountWaiting && 
 				node.enableULPRDataPropagation /* dangerous to do RecentlyFailed if we won't track/propagate offers */) {
 			// Recently failed is possible.
 			// Route twice, each time ignoring timeout.
@@ -1188,7 +1186,7 @@ public class PeerManager {
 							// This is the sooner of the two top nodes' timeouts.
 							// We also take into account the sooner of any timed out node, IF there are exactly 3 nodes waiting.
 							long until = Math.min(secondTime, firstTime);
-							if(countWaiting == 3) {
+							if(countWaiting == maxCountWaiting) {
 								// Count the others as well if there are only 3.
 								// If there are more than that they won't matter.
 								until = Math.min(until, soonestTimeoutWakeup);
@@ -1251,6 +1249,16 @@ public class PeerManager {
 		return best;
 	}
 
+	/**
+	 * @param peers 
+	 * @return The minimum number of peers which are waiting for timeouts due to RecentlyFailed or 
+	 * DNF's for which we will terminate the request with a RecentlyFailed of our own.
+	 */
+	private int maxCountWaiting(PeerNode[] peers) {
+		int count = countConnectedPeers(peers);
+		return Math.min(10, Math.max(3, count / 4));
+	}
+
 	static final int MIN_DELTA = 2000;
 	
 	/** Check whether the routing situation will change soon because of a node coming out of backoff or of
@@ -1264,6 +1272,11 @@ public class PeerManager {
 	 */
 	private long checkBackoffsForRecentlyFailed(PeerNode[] peers, PeerNode best, double target, double bestDistance, double myLoc, double prevLoc, long now, TimedOutNodesList entry, short outgoingHTL) {
 		long overallWakeup = Long.MAX_VALUE;
+
+		Set<Double> excludeLocations = new HashSet<Double>();
+		excludeLocations.add(myLoc);
+		excludeLocations.add(prevLoc);
+
 		for(PeerNode p : peers) {
 			if(p == best) continue;
 			if(!p.isRoutable()) continue;
@@ -1275,16 +1288,9 @@ public class PeerManager {
 			double realDiff = Location.distance(loc, target);
 			double diff = realDiff;
 			
-			double[] peersLocation = p.getPeersLocation();
-			if((peersLocation != null) && (p.shallWeRouteAccordingToOurPeersLocation())) {
-				for(double l : peersLocation) {
-					boolean ignoreLoc = false; // Because we've already been there
-					if(Math.abs(l - myLoc) < Double.MIN_VALUE * 2 ||
-							Math.abs(l - prevLoc) < Double.MIN_VALUE * 2)
-						continue;
-					// For purposes of recently failed, we haven't routed anywhere else.
-					// However we do need to check for our location, and the source's location.
-					if(ignoreLoc) continue;
+			if (p.shallWeRouteAccordingToOurPeersLocation(outgoingHTL)) {
+				double l = p.getClosestPeerLocation(target, excludeLocations);
+				if (!Double.isNaN(l)) {
 					double newDiff = Location.distance(l, target);
 					if(newDiff < diff) {
 						loc = l;
@@ -2081,10 +2087,13 @@ public class PeerManager {
 		if(logMINOR) Logger.minor(this, "countConnectedDarknetPeers() returning "+count);
 		return count;
 	}
-
+	
 	public int countConnectedPeers() {
+		return countConnectedPeers(myPeers());
+	}
+
+	private int countConnectedPeers(PeerNode[] peers) {
 		int count = 0;
-		PeerNode[] peers = myPeers();
 		for(PeerNode peer: peers) {
 			if(peer == null)
 				continue;
